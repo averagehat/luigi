@@ -17,6 +17,7 @@
 import os
 
 from helpers import unittest
+from nose.plugins.attrib import attr
 
 import luigi
 import luigi.notifications
@@ -48,6 +49,8 @@ try:
         password=password,
     )
     conn.close()
+    psycopg2.extensions.register_type(psycopg2.extensions.UNICODE)
+    psycopg2.extensions.register_type(psycopg2.extensions.UNICODEARRAY)
 except Exception:
     raise unittest.SkipTest('Unable to connect to postgres')
 
@@ -76,6 +79,8 @@ class TestPostgresTask(CopyToTestDB):
         yield 'foo', 123, 123.45
         yield None, '-100', '5143.213'
         yield '\t\n\r\\N', 0, 0
+        yield u'éцү我', 0, 0
+        yield '', 0, r'\N'  # Test working default null charcter
 
 
 class MetricBase(CopyToTestDB):
@@ -103,6 +108,7 @@ class Metric2(MetricBase):
         yield 'metric2', 3
 
 
+@attr('postgres')
 class TestPostgresImportTask(unittest.TestCase):
 
     def test_default_escape(self):
@@ -132,8 +138,10 @@ class TestPostgresImportTask(unittest.TestCase):
         self.assertEqual(rows, (
             ('foo', 123, 123.45),
             (None, -100, 5143.213),
-            ('\t\n\r\\N', 0.0, 0))
-        )
+            ('\t\n\r\\N', 0.0, 0),
+            (u'éцү我', 0, 0),
+            (u'', 0, None),  # Test working default null charcter
+        ))
 
     def test_multimetric(self):
         metrics = MetricBase()

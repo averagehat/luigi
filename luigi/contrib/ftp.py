@@ -28,7 +28,6 @@ Be aware that normal ftp do not provide secure communication.
 import datetime
 import ftplib
 import os
-import sys
 import random
 import io
 
@@ -36,7 +35,7 @@ import luigi
 import luigi.file
 import luigi.format
 import luigi.target
-from luigi.format import FileWrapper, MixedUnicodeBytes
+from luigi.format import FileWrapper
 
 
 class RemoteFileSystem(luigi.target.FileSystem):
@@ -148,7 +147,7 @@ class RemoteFileSystem(luigi.target.FileSystem):
 
         self.ftpcon.quit()
 
-    def put(self, local_path, path):
+    def put(self, local_path, path, atomic=True):
         # create parent folder if not exists
         self._connect()
 
@@ -166,10 +165,15 @@ class RemoteFileSystem(luigi.target.FileSystem):
         self.ftpcon.cwd("/")
 
         # random file name
-        tmp_path = folder + os.sep + 'luigi-tmp-%09d' % random.randrange(0, 1e10)
+        if atomic:
+            tmp_path = folder + os.sep + 'luigi-tmp-%09d' % random.randrange(0, 1e10)
+        else:
+            tmp_path = normpath
 
         self.ftpcon.storbinary('STOR %s' % tmp_path, open(local_path, 'rb'))
-        self.ftpcon.rename(tmp_path, normpath)
+
+        if atomic:
+            self.ftpcon.rename(tmp_path, normpath)
 
         self.ftpcon.quit()
 
@@ -228,10 +232,6 @@ class RemoteTarget(luigi.target.FileSystemTarget):
         if format is None:
             format = luigi.format.get_default_format()
 
-        # Allow to write unicode in file for retrocompatibility
-        if sys.version_info[:2] <= (2, 6):
-            format = format >> MixedUnicodeBytes
-
         self.path = path
         self.mtime = mtime
         self.format = format
@@ -271,8 +271,8 @@ class RemoteTarget(luigi.target.FileSystemTarget):
     def exists(self):
         return self.fs.exists(self.path, self.mtime)
 
-    def put(self, local_path):
-        self.fs.put(local_path, self.path)
+    def put(self, local_path, atomic=True):
+        self.fs.put(local_path, self.path, atomic)
 
     def get(self, local_path):
         self.fs.get(self.path, local_path)

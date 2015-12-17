@@ -25,11 +25,8 @@ from luigi.target import FileSystemTarget
 from luigi.contrib.hdfs.config import tmppath
 from luigi.contrib.hdfs import format as hdfs_format
 from luigi.contrib.hdfs import clients as hdfs_clients
-
-try:
-    from urlparse import urlsplit
-except ImportError:
-    from urllib.parse import urlsplit
+from luigi.six.moves.urllib import parse as urlparse
+from luigi.six.moves import range
 
 
 class HdfsTarget(FileSystemTarget):
@@ -89,7 +86,7 @@ class HdfsTarget(FileSystemTarget):
         self.format = format
 
         self.is_tmp = is_tmp
-        (scheme, netloc, path, query, fragment) = urlsplit(path)
+        (scheme, netloc, path, query, fragment) = urlparse.urlsplit(path)
         if ":" in path:
             raise ValueError('colon is not allowed in hdfs filenames')
         self._fs = fs or hdfs_clients.get_autoconfig_client()
@@ -97,7 +94,7 @@ class HdfsTarget(FileSystemTarget):
     def __del__(self):
         # TODO: not sure is_tmp belongs in Targets construction arguments
         if self.is_tmp and self.exists():
-            self.remove()
+            self.remove(skip_trash=True)
 
     @property
     def fs(self):
@@ -158,6 +155,12 @@ class HdfsTarget(FileSystemTarget):
             self.path = path
         return move_succeeded
 
+    def copy(self, dst_dir):
+        """
+        Copy to destination directory.
+        """
+        self.fs.copy(self.path, dst_dir)
+
     def is_writable(self):
         """
         Currently only works with hadoopcli
@@ -167,7 +170,7 @@ class HdfsTarget(FileSystemTarget):
             parts = self.path.split("/")
             # start with the full path and then up the tree until we can check
             length = len(parts)
-            for part in xrange(length):
+            for part in range(length):
                 path = "/".join(parts[0:length - part]) + "/"
                 if self.fs.exists(path):
                     # if the path exists and we can write there, great!

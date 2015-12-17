@@ -22,16 +22,44 @@ See :doc:`/central_scheduler` for more info.
 
 import json
 import logging
+import socket
 import time
 
-from luigi.six.moves.urllib.parse import urlencode
-from luigi.six.moves.urllib.request import Request, urlopen
+from luigi.six.moves.urllib.parse import urljoin, urlencode, urlparse
+from luigi.six.moves.urllib.request import urlopen
 from luigi.six.moves.urllib.error import URLError
 
 from luigi import configuration
 from luigi.scheduler import PENDING, Scheduler
 
+
+HAS_UNIX_SOCKET = True
+HAS_REQUESTS = True
+
+
+try:
+    import requests_unixsocket as requests
+except ImportError:
+    HAS_UNIX_SOCKET = False
+    try:
+        import requests
+    except ImportError:
+        HAS_REQUESTS = False
+
+
 logger = logging.getLogger('luigi-interface')  # TODO: 'interface'?
+
+
+def _urljoin(base, url):
+    """
+    Join relative URLs to base URLs like urllib.parse.urljoin but support
+    arbitrary URIs (esp. 'http+unix://').
+    """
+    parsed = urlparse(base)
+    scheme = parsed.scheme
+    return urlparse(
+        urljoin(parsed._replace(scheme='http').geturl(), url)
+    )._replace(scheme=scheme).geturl()
 
 
 class RPCError(Exception):
@@ -41,32 +69,53 @@ class RPCError(Exception):
         self.sub_exception = sub_exception
 
 
+class URLLibFetcher(object):
+    raises = (URLError, socket.timeout)
+
+    def fetch(self, full_url, body, timeout):
+        body = urlencode(body).encode('utf-8')
+        return urlopen(full_url, body, timeout).read().decode('utf-8')
+
+
+class RequestsFetcher(object):
+    def __init__(self, session):
+        from requests import exceptions as requests_exceptions
+        self.raises = requests_exceptions.RequestException
+        self.session = session
+
+    def fetch(self, full_url, body, timeout):
+        resp = self.session.get(full_url, data=body, timeout=timeout)
+        resp.raise_for_status()
+        return resp.text
+
+
 class RemoteScheduler(Scheduler):
     """
     Scheduler proxy object. Talks to a RemoteSchedulerResponder.
     """
 
-    def __init__(self, host='localhost', port=8082, connect_timeout=None, url_prefix=''):
-        self._host = host
-        self._port = port
-        self._url_prefix = url_prefix
+    def __init__(self, url='http://localhost:8082/', connect_timeout=None):
+        assert not url.startswith('http+unix://') or HAS_UNIX_SOCKET, (
+            'You need to install requests-unixsocket for Unix socket support.'
+        )
 
+        self._url = url.rstrip('/')
         config = configuration.get_config()
 
         if connect_timeout is None:
             connect_timeout = config.getfloat('core', 'rpc-connect-timeout', 10.0)
         self._connect_timeout = connect_timeout
 
+        if HAS_REQUESTS:
+            self._fetcher = RequestsFetcher(requests.Session())
+        else:
+            self._fetcher = URLLibFetcher()
+
     def _wait(self):
         time.sleep(30)
 
-    def _fetch(self, url, body, log_exceptions=True, attempts=3):
-
-        full_url = 'http://{host}:{port:d}{prefix}{url}'.format(
-            host=self._host,
-            port=self._port,
-            prefix=self._url_prefix,
-            url=url)
+    def _fetch(self, url_suffix, body, log_exceptions=True, attempts=3):
+        full_url = _urljoin(self._url, url_suffix)
         last_exception = None
         attempt = 0
         while attempt < attempts:
@@ -75,36 +124,39 @@ class RemoteScheduler(Scheduler):
                 logger.info("Retrying...")
                 self._wait()  # wait for a bit and retry
             try:
-                response = urlopen(full_url, body, self._connect_timeout)
+                response = self._fetcher.fetch(full_url, body, self._connect_timeout)
                 break
-            except URLError as e:
+            except self._fetcher.raises as e:
                 last_exception = e
                 if log_exceptions:
-                    logger.exception("Failed connecting to remote scheduler %r", self._host)
+                    logger.exception("Failed connecting to remote scheduler %r", self._url)
                 continue
         else:
             raise RPCError(
                 "Errors (%d attempts) when connecting to remote scheduler %r" %
-                (attempts, self._host),
+                (attempts, self._url),
                 last_exception
             )
-        return response.read().decode('utf-8')
+        return response
 
-    def _request(self, url, data, log_exceptions=True, attempts=3):
-        data = {'data': json.dumps(data)}
-        body = urlencode(data).encode('utf-8')
+    def _request(self, url, data, log_exceptions=True, attempts=3, allow_null=True):
+        body = {'data': json.dumps(data)}
 
-        page = self._fetch(url, body, log_exceptions, attempts)
-        result = json.loads(page)
-        return result["response"]
+        for _ in range(attempts):
+            page = self._fetch(url, body, log_exceptions, attempts)
+            response = json.loads(page)["response"]
+            if allow_null or response is not None:
+                return response
+        raise RPCError("Received null response from remote scheduler %r" % self._url)
 
     def ping(self, worker):
-        # just one attemtps, keep-alive thread will keep trying anyway
+        # just one attempt, keep-alive thread will keep trying anyway
         self._request('/api/ping', {'worker': worker}, attempts=1)
 
     def add_task(self, worker, task_id, status=PENDING, runnable=True,
                  deps=None, new_deps=None, expl=None, resources=None, priority=0,
-                 family='', module=None, params=None, assistant=False):
+                 family='', module=None, params=None, assistant=False,
+                 tracking_url=None):
         self._request('/api/add_task', {
             'task_id': task_id,
             'worker': worker,
@@ -119,14 +171,20 @@ class RemoteScheduler(Scheduler):
             'module': module,
             'params': params,
             'assistant': assistant,
+            'tracking_url': tracking_url,
         })
 
-    def get_work(self, worker, host=None, assistant=False):
+    def get_work(self, worker, host=None, assistant=False, current_tasks=None):
         return self._request(
             '/api/get_work',
-            {'worker': worker, 'host': host, 'assistant': assistant},
-            log_exceptions=False,
-            attempts=1)
+            {
+                'worker': worker,
+                'host': host,
+                'assistant': assistant,
+                'current_tasks': current_tasks,
+            },
+            allow_null=False,
+        )
 
     def graph(self):
         return self._request('/api/graph', {})

@@ -25,10 +25,8 @@ an example of how to run a Hadoop job.
 from __future__ import print_function
 
 import abc
-import binascii
 import datetime
 import glob
-import json
 import logging
 import os
 import pickle
@@ -46,11 +44,11 @@ import tempfile
 import warnings
 from hashlib import md5
 from itertools import groupby
-
 from luigi import six
 
 from luigi import configuration
 import luigi
+import luigi.task
 import luigi.contrib.hdfs
 import luigi.s3
 from luigi import mrrunner
@@ -58,9 +56,25 @@ from luigi import mrrunner
 if six.PY2:
     from itertools import imap as map
 
+try:
+    # See benchmark at https://gist.github.com/mvj3/02dca2bcc8b0ef1bbfb5
+    import ujson as json
+except ImportError:
+    import json
+
 logger = logging.getLogger('luigi-interface')
 
 _attached_packages = []
+
+
+TRACKING_RE = re.compile(r'(tracking url|the url to track the job):\s+(?P<url>.+)$')
+
+
+class hadoop(luigi.task.Config):
+    pool = luigi.Parameter(default=None,
+                           description='Hadoop pool so use for Hadoop tasks. '
+                           'To specify pools per tasks, see '
+                           'BaseHadoopJobTask.pool')
 
 
 def attach(*packages):
@@ -199,6 +213,7 @@ class HadoopRunContext(object):
 
     def __init__(self):
         self.job_id = None
+        self.application_id = None
 
     def __enter__(self):
         self.__old_signal = signal.getsignal(signal.SIGTERM)
@@ -206,7 +221,10 @@ class HadoopRunContext(object):
         return self
 
     def kill_job(self, captured_signal=None, stack_frame=None):
-        if self.job_id:
+        if self.application_id:
+            logger.info('Job interrupted, killing application %s' % self.application_id)
+            subprocess.call(['yarn', 'application', '-kill', self.application_id])
+        elif self.job_id:
             logger.info('Job interrupted, killing job %s', self.job_id)
             subprocess.call(['mapred', 'job', '-kill', self.job_id])
         if captured_signal is not None:
@@ -241,7 +259,7 @@ def run_and_track_hadoop_job(arglist, tracking_url_callback=None, env=None):
     :param env:
     :return:
     """
-    logger.info('%s', ' '.join(arglist))
+    logger.info('%s', subprocess.list2cmdline(arglist))
 
     def write_luigi_history(arglist, history):
         """
@@ -265,6 +283,7 @@ def run_and_track_hadoop_job(arglist, tracking_url_callback=None, env=None):
         # This URL is useful for fetching the logs of the job.
         tracking_url = None
         job_id = None
+        application_id = None
         err_lines = []
 
         with HadoopRunContext() as hadoop_context:
@@ -275,8 +294,9 @@ def run_and_track_hadoop_job(arglist, tracking_url_callback=None, env=None):
                 if err_line:
                     logger.info('%s', err_line)
                 err_line = err_line.lower()
-                if err_line.find('tracking url') != -1:
-                    tracking_url = err_line.split('tracking url: ')[-1]
+                tracking_url_match = TRACKING_RE.search(err_line)
+                if tracking_url_match:
+                    tracking_url = tracking_url_match.group('url')
                     try:
                         tracking_url_callback(tracking_url)
                     except Exception as e:
@@ -288,10 +308,13 @@ def run_and_track_hadoop_job(arglist, tracking_url_callback=None, env=None):
                 if err_line.find('submitted hadoop job:') != -1:
                     # scalding output
                     job_id = err_line.split('submitted hadoop job: ')[-1]
+                if err_line.find('submitted application ') != -1:
+                    application_id = err_line.split('submitted application ')[-1]
                 hadoop_context.job_id = job_id
+                hadoop_context.application_id = application_id
 
         # Read the rest + stdout
-        err = ''.join(err_lines + [err_line for err_line in proc.stderr])
+        err = ''.join(err_lines + [an_err_line for an_err_line in proc.stderr])
         temp_stdout.seek(0)
         out = ''.join(temp_stdout.readlines())
 
@@ -387,7 +410,7 @@ class HadoopJobRunner(JobRunner):
         self.end_job_with_atomic_move_dir = end_job_with_atomic_move_dir
         self.tmp_dir = False
 
-    def run_job(self, job):
+    def run_job(self, job, tracking_url_callback=None):
         packages = [luigi] + self.modules + job.extra_modules() + list(_attached_packages)
 
         # find the module containing the job
@@ -439,7 +462,7 @@ class HadoopJobRunner(JobRunner):
 
         for libjar in self.libjars_in_hdfs:
             run_cmd = luigi.contrib.hdfs.load_hadoop_cmd() + ['fs', '-get', libjar, self.tmp_dir]
-            logger.debug(' '.join(run_cmd))
+            logger.debug(subprocess.list2cmdline(run_cmd))
             subprocess.call(run_cmd)
             libjars.append(os.path.join(self.tmp_dir, os.path.basename(libjar)))
 
@@ -500,7 +523,7 @@ class HadoopJobRunner(JobRunner):
 
         job.dump(self.tmp_dir)
 
-        run_and_track_hadoop_job(arglist)
+        run_and_track_hadoop_job(arglist, tracking_url_callback=tracking_url_callback)
 
         if self.end_job_with_atomic_move_dir:
             luigi.contrib.hdfs.HdfsTarget(output_hadoop).move_dir(output_final)
@@ -595,7 +618,7 @@ class LocalJobRunner(JobRunner):
 
 
 class BaseHadoopJobTask(luigi.Task):
-    pool = luigi.Parameter(is_global=True, default=None, significant=False)
+    pool = luigi.Parameter(default=None, significant=False, positional=False)
     # This value can be set to change the default batching increment. Default is 1 for backwards compatibility.
     batch_counter_default = 1
 
@@ -608,16 +631,23 @@ class BaseHadoopJobTask(luigi.Task):
     _counter_dict = {}
     task_id = None
 
+    def _get_pool(self):
+        """ Protected method """
+        if self.pool:
+            return self.pool
+        if hadoop().pool:
+            return hadoop().pool
+
     @abc.abstractmethod
     def job_runner(self):
         pass
 
     def jobconfs(self):
         jcs = []
-        jcs.append('mapred.job.name="%s"' % self.task_id)
+        jcs.append('mapred.job.name=%s' % self.task_id)
         if self.mr_priority != NotImplemented:
             jcs.append('mapred.job.priority=%s' % self.mr_priority())
-        pool = self.pool
+        pool = self._get_pool()
         if pool is not None:
             # Supporting two schedulers: fair (default) and capacity using the same option
             scheduler_type = configuration.get_config().get('hadoop', 'scheduler', 'fair')
@@ -640,9 +670,25 @@ class BaseHadoopJobTask(luigi.Task):
     def init_hadoop(self):
         pass
 
-    def run(self):
+    # available formats are "python" and "json".
+    data_interchange_format = "python"
+
+    def run(self, tracking_url_callback=None):
+        # The best solution is to store them as lazy `cached_property`, but it
+        # has extraneous dependency. And `property` is slow (need to be
+        # calculated every time when called), so we save them as attributes
+        # directly.
+        self.serialize = DataInterchange[self.data_interchange_format]['serialize']
+        self.internal_serialize = DataInterchange[self.data_interchange_format]['internal_serialize']
+        self.deserialize = DataInterchange[self.data_interchange_format]['deserialize']
+
         self.init_local()
-        self.job_runner().run_job(self)
+        try:
+            self.job_runner().run_job(self, tracking_url_callback=tracking_url_callback)
+        except TypeError as ex:
+            if 'unexpected keyword argument' not in ex.message:
+                raise
+            self.job_runner().run_job(self)
 
     def requires_local(self):
         """
@@ -676,6 +722,16 @@ class BaseHadoopJobTask(luigi.Task):
       """.format(message=exception.message, stdout=exception.out, stderr=exception.err)
         else:
             return super(BaseHadoopJobTask, self).on_failure(exception)
+
+
+DataInterchange = {
+    "python": {"serialize": str,
+               "internal_serialize": repr,
+               "deserialize": eval},
+    "json": {"serialize": json.dumps,
+             "internal_serialize": json.dumps,
+             "deserialize": json.loads}
+}
 
 
 class JobTask(BaseHadoopJobTask):
@@ -737,7 +793,14 @@ class JobTask(BaseHadoopJobTask):
         """
         for output in outputs:
             try:
-                print("\t".join(map(str, flatten(output))), file=stdout)
+                output = flatten(output)
+                if self.data_interchange_format == "json":
+                    # Only dump one json string, and skip another one, maybe key or value.
+                    output = filter(lambda x: x, output)
+                else:
+                    # JSON is already serialized, so we put `self.serialize` in a else statement.
+                    output = map(self.serialize, output)
+                print("\t".join(output), file=stdout)
             except:
                 print(output, file=stderr)
                 raise
@@ -827,8 +890,11 @@ class JobTask(BaseHadoopJobTask):
             missing = []
             for src, dst in self._links:
                 d = os.path.dirname(dst)
-                if d and not os.path.exists(d):
-                    os.makedirs(d)
+                if d:
+                    try:
+                        os.makedirs(d)
+                    except OSError:
+                        pass
                 if not os.path.exists(src):
                     missing.append(src)
                     continue
@@ -876,8 +942,8 @@ class JobTask(BaseHadoopJobTask):
         """
         Iterate over input, collect values with the same key, and call the reducer for each unique key.
         """
-        for key, values in groupby(inputs, key=lambda x: repr(x[0])):
-            for output in reducer(eval(key), (v[1] for v in values)):
+        for key, values in groupby(inputs, key=lambda x: self.internal_serialize(x[0])):
+            for output in reducer(self.deserialize(key), (v[1] for v in values)):
                 yield output
         if final != NotImplemented:
             for output in final():
@@ -917,11 +983,11 @@ class JobTask(BaseHadoopJobTask):
         Yields a tuple of python objects.
         """
         for input_line in input_stream:
-            yield list(map(eval, input_line.split("\t")))
+            yield list(map(self.deserialize, input_line.split("\t")))
 
     def internal_writer(self, outputs, stdout):
         """
         Writer which outputs the python repr for each item.
         """
         for output in outputs:
-            print("\t".join(map(repr, output)), file=stdout)
+            print("\t".join(map(self.internal_serialize, output)), file=stdout)

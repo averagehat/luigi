@@ -18,8 +18,8 @@
 import functools
 import re
 from helpers import unittest
-from datetime import datetime
 import random
+import pickle
 
 import helpers
 import luigi
@@ -29,6 +29,7 @@ from luigi.contrib import hdfs
 from luigi import six
 from minicluster import MiniClusterTestCase
 from nose.plugins.attrib import attr
+import luigi.contrib.hdfs.clients
 
 from target_test import FileSystemTargetTestMixin
 
@@ -278,8 +279,7 @@ class ComplexOldFormatTest(MiniClusterTestCase):
         self.assertEqual(a, b'foo')
 
 
-@attr('minicluster')
-class HdfsTargetTests(MiniClusterTestCase, FileSystemTargetTestMixin):
+class HdfsTargetTestMixin(FileSystemTargetTestMixin):
 
     def create_target(self, format=None):
         target = hdfs.HdfsTarget(self._test_file(), format=format)
@@ -449,6 +449,15 @@ class HdfsTargetTests(MiniClusterTestCase, FileSystemTargetTestMixin):
     def test_tmppath_username(self):
         self.assertRegexpMatches(hdfs.tmppath('/path/to/stuff', include_unix_username=True),
                                  "^/tmp/[a-z0-9_]+/path/to/stuff-luigitemp-\d+")
+
+    def test_pickle(self):
+        t = hdfs.HdfsTarget("/tmp/dir")
+        pickle.dumps(t)
+
+
+@attr('minicluster')
+class HdfsTargetTest(MiniClusterTestCase, HdfsTargetTestMixin):
+    pass
 
 
 @attr('minicluster')
@@ -696,7 +705,7 @@ class HdfsClientTest(MiniClusterTestCase):
         self.assertEqual(4, len(entries[5]), msg="%r" % entries)
         self.assertEqual(path + '/sub2/file4.dat', entries[5][0], msg="%r" % entries)
 
-    @mock.patch('luigi.contrib.hdfs.clients.call_check')
+    @mock.patch('luigi.contrib.hdfs.hadoopcli_clients.HdfsClient.call_check')
     def test_cdh3_client(self, call_check):
         cdh3_client = luigi.contrib.hdfs.HdfsClientCdh3()
         cdh3_client.remove("/some/path/here")

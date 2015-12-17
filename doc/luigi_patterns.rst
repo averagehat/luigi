@@ -8,7 +8,7 @@ One nice thing about Luigi is that it's super easy to depend on tasks defined in
 It's also trivial to have "forks" in the execution path,
 where the output of one task may become the input of many other tasks.
 
-Currently no semantics for "intermediate" output is supported,
+Currently, no semantics for "intermediate" output is supported,
 meaning that all output will be persisted indefinitely.
 The upside of that is that if you try to run X -> Y, and Y crashes,
 you can resume with the previously built X.
@@ -26,7 +26,7 @@ works.
 
 .. code:: python
 
-    class AllReports(luigi.Task):
+    class AllReports(luigi.WrapperTask):
         date = luigi.DateParameter(default=datetime.date.today())
         def requires(self):
             yield SomeReport(self.date)
@@ -36,8 +36,10 @@ works.
             yield FooBarBazReport(self.date)
 
 This simple task will not do anything itself, but will invoke a bunch of
-other tasks. Per each invocation Luigi will perform as many of the pending
+other tasks. Per each invocation, Luigi will perform as many of the pending
 jobs as possible (those which have all their dependencies present).
+
+You'll need to use :class:`~luigi.task.WrapperTask` for this instead of the usual Task class, because this job will not produce any output of its own, and as such needs a way to indicate when it's complete. This class is used for tasks that only wrap other tasks and that by definition are done if all their requirements exist.
 
 Triggering recurring tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -54,7 +56,7 @@ self.date. Then, so long as Luigi keeps being invoked, the backlog of
 jobs would catch up nicely after fixing intermittent problems.
 
 Luigi actually comes with a reusable tool for achieving this, called
-RangeDailyBase (resp. RangeHourlyBase). Simply putting
+:class:`~luigi.tools.range.RangeDailyBase` (resp. :class:`~luigi.tools.range.RangeHourlyBase`). Simply putting
 
 .. code:: console
 
@@ -63,14 +65,14 @@ RangeDailyBase (resp. RangeHourlyBase). Simply putting
 in your crontab will easily keep gaps from occurring from 2015-01-01
 onwards. NB - it will not always loop over everything from 2015-01-01
 till current time though, but rather a maximum of 3 months ago by
-default - see RangeDailyBase documentation for this and more knobs
+default - see :class:`~luigi.tools.range.RangeDailyBase` documentation for this and more knobs
 for tweaking behavior. See also Monitoring below.
 
 Efficiently triggering recurring tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 RangeDailyBase, described above, is named like that because a more
-efficient subclass exists, RangeDaily (resp. RangeHourly), tailored for
+efficient subclass exists, :class:`~luigi.tools.range.RangeDaily` (resp. :class:`~luigi.tools.range.RangeHourly`), tailored for
 hundreds of task classes scheduled concurrently with contiguousness
 requirements spanning years (which would incur redundant completeness
 checks and scheduler overload using the naive looping approach.) Usage:
@@ -96,6 +98,18 @@ and stop (exclusive) parameters specified:
 .. code:: console
 
 	luigi --module all_reports RangeDaily --of AllReportsV2 --start 2014-10-31 --stop 2014-12-25
+
+Propagating parameters with Range
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When your recurring task has a parameter, you'll at first notice that the Range
+tasks do not recognize or propagate parameters passed to them. The easiest
+solution is to set the parameter at the task family level as described
+:ref:`here <Parameter-class-level-parameters>`.
+
+.. code:: console
+
+	luigi RangeDaily --of MyTask --start 2014-10-31 --MyTask-my-param 123
 
 Monitoring task pipelines
 ~~~~~~~~~~~~~~~~~~~~~~~~~

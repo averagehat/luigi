@@ -199,11 +199,11 @@ class SGEJobTask(luigi.Task):
         if errors[0].strip() == 'stdin: is not a tty':  # SGE complains when we submit through a pipe
             errors.pop(0)
         return errors
+
     def _init_local(self):
         def up(p): return os.path.dirname(os.path.normpath(p))
         unstale = lambda f:  f if os.path.exists(f) else unstale(up(f))
         self.unstales = map(lambda x: unstale(x.path), flatten(self.output()))
-
         # Set up temp folder in shared directory (trim to max filename length)
         base_tmp_dir = self.shared_tmp_dir
         random_id = '%016x' % random.getrandbits(64)
@@ -277,7 +277,6 @@ class SGEJobTask(luigi.Task):
         if self.tmp_dir and os.path.exists(self.tmp_dir):
             logger.info('Removing temporary directory %s' % self.tmp_dir)
             shutil.rmtree(self.tmp_dir)
-
 
     def _track_job(self):
         while True:

@@ -20,12 +20,10 @@ try:
     import ConfigParser
 except ImportError:
     import configparser as ConfigParser
-import logging
 import mock
 import os
 import subprocess
 from helpers import unittest
-import warnings
 
 from luigi import six
 
@@ -49,18 +47,8 @@ class AmbiguousClass(luigi.Task):
     pass
 
 
-class AmbiguousClass(luigi.Task):
+class AmbiguousClass(luigi.Task):  # NOQA
     pass
-
-
-class NonAmbiguousClass(luigi.ExternalTask):
-    pass
-
-
-class NonAmbiguousClass(luigi.Task):
-
-    def run(self):
-        NonAmbiguousClass.has_run = True
 
 
 class TaskWithSameName(luigi.Task):
@@ -69,7 +57,7 @@ class TaskWithSameName(luigi.Task):
         self.x = 42
 
 
-class TaskWithSameName(luigi.Task):
+class TaskWithSameName(luigi.Task):  # NOQA
     # there should be no ambiguity
 
     def run(self):
@@ -96,6 +84,11 @@ class FooSubClass(FooBaseClass):
     pass
 
 
+class ATaskThatFails(luigi.Task):
+    def run(self):
+        raise ValueError()
+
+
 class CmdlineTest(unittest.TestCase):
 
     def setUp(self):
@@ -107,6 +100,11 @@ class CmdlineTest(unittest.TestCase):
         self.assertEqual(dict(MockTarget.fs.get_all_data()), {'/tmp/test_100': b'done'})
 
     @mock.patch("logging.getLogger")
+    def test_cmdline_local_scheduler(self, logger):
+        luigi.run(['SomeTask', '--no-lock', '--n', '101'], local_scheduler=True)
+        self.assertEqual(dict(MockTarget.fs.get_all_data()), {'/tmp/test_101': b'done'})
+
+    @mock.patch("logging.getLogger")
     def test_cmdline_other_task(self, logger):
         luigi.run(['--local-scheduler', '--no-lock', 'SomeTask', '--n', '1000'])
         self.assertEqual(dict(MockTarget.fs.get_all_data()), {'/tmp/test_1000': b'done'})
@@ -114,12 +112,6 @@ class CmdlineTest(unittest.TestCase):
     @mock.patch("logging.getLogger")
     def test_cmdline_ambiguous_class(self, logger):
         self.assertRaises(Exception, luigi.run, ['--local-scheduler', '--no-lock', 'AmbiguousClass'])
-
-    @mock.patch("logging.getLogger")
-    @mock.patch("warnings.warn")
-    def test_cmdline_non_ambiguous_class(self, warn, logger):
-        luigi.run(['--local-scheduler', '--no-lock', 'NonAmbiguousClass'])
-        self.assertTrue(NonAmbiguousClass.has_run)
 
     @mock.patch("logging.getLogger")
     @mock.patch("logging.StreamHandler")
@@ -154,7 +146,8 @@ class CmdlineTest(unittest.TestCase):
 
     @mock.patch('argparse.ArgumentParser.print_usage')
     def test_non_existent_class(self, print_usage):
-        self.assertRaises(SystemExit, luigi.run, ['--local-scheduler', '--no-lock', 'XYZ'])
+        self.assertRaises(luigi.task_register.TaskClassNotFoundException,
+                          luigi.run, ['--local-scheduler', '--no-lock', 'XYZ'])
 
     @mock.patch('argparse.ArgumentParser.print_usage')
     def test_no_task(self, print_usage):
@@ -166,6 +159,7 @@ class InvokeOverCmdlineTest(unittest.TestCase):
     def _run_cmdline(self, args):
         env = os.environ.copy()
         env['PYTHONPATH'] = env.get('PYTHONPATH', '') + ':.:test'
+        print('Running: ' + ' '.join(args))  # To simplify rerunning failing tests
         p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         stdout, stderr = p.communicate()  # Unfortunately subprocess.check_output is 2.7+
         return p.returncode, stdout, stderr
@@ -182,8 +176,14 @@ class InvokeOverCmdlineTest(unittest.TestCase):
         self._run_cmdline(args)
         self.assertTrue(t.exists())
 
+    def test_python_module(self):
+        t = luigi.LocalTarget(is_tmp=True)
+        args = ['python', '-m', 'luigi', '--module', 'cmdline_test', 'WriteToFile', '--filename', t.path, '--local-scheduler', '--no-lock']
+        self._run_cmdline(args)
+        self.assertTrue(t.exists())
+
     def test_direct_python_help(self):
-        returncode, stdout, stderr = self._run_cmdline(['python', 'test/cmdline_test.py', '--help'])
+        returncode, stdout, stderr = self._run_cmdline(['python', 'test/cmdline_test.py', '--help-all'])
         self.assertTrue(stdout.find(b'--FooBaseClass-x') != -1)
         self.assertFalse(stdout.find(b'--x') != -1)
 
@@ -193,34 +193,101 @@ class InvokeOverCmdlineTest(unittest.TestCase):
         self.assertTrue(stdout.find(b'--x') != -1)
 
     def test_bin_luigi_help(self):
-        returncode, stdout, stderr = self._run_cmdline(['./bin/luigi', '--module', 'cmdline_test', '--help'])
+        returncode, stdout, stderr = self._run_cmdline(['./bin/luigi', '--module', 'cmdline_test', '--help-all'])
         self.assertTrue(stdout.find(b'--FooBaseClass-x') != -1)
         self.assertFalse(stdout.find(b'--x') != -1)
+
+    def test_python_module_luigi_help(self):
+        returncode, stdout, stderr = self._run_cmdline(['python', '-m', 'luigi', '--module', 'cmdline_test', '--help-all'])
+        self.assertTrue(stdout.find(b'--FooBaseClass-x') != -1)
+        self.assertFalse(stdout.find(b'--x') != -1)
+
+    def test_bin_luigi_help_no_module(self):
+        returncode, stdout, stderr = self._run_cmdline(['./bin/luigi', '--help'])
+        self.assertTrue(stdout.find(b'usage:') != -1)
+
+    def test_bin_luigi_help_not_spammy(self):
+        """
+        Test that `luigi --help` fits on one screen
+        """
+        returncode, stdout, stderr = self._run_cmdline(['./bin/luigi', '--help'])
+        self.assertLessEqual(len(stdout.splitlines()), 15)
+
+    def test_bin_luigi_all_help_spammy(self):
+        """
+        Test that `luigi --help-all` doesn't fit on a screen
+
+        Naturally, I don't mind this test breaking, but it convinces me that
+        the "not spammy" test is actually testing what it claims too.
+        """
+        returncode, stdout, stderr = self._run_cmdline(['./bin/luigi', '--help-all'])
+        self.assertGreater(len(stdout.splitlines()), 15)
+
+    def test_error_mesage_on_misspelled_task(self):
+        returncode, stdout, stderr = self._run_cmdline(['./bin/luigi', 'RangeDaili'])
+        self.assertTrue(stderr.find(b'RangeDaily') != -1)
+
+    def test_bin_luigi_no_parameters(self):
+        returncode, stdout, stderr = self._run_cmdline(['./bin/luigi'])
+        self.assertTrue(stderr.find(b'No task specified') != -1)
+
+    def test_python_module_luigi_no_parameters(self):
+        returncode, stdout, stderr = self._run_cmdline(['python', '-m', 'luigi'])
+        self.assertTrue(stderr.find(b'No task specified') != -1)
 
     def test_bin_luigi_help_class(self):
         returncode, stdout, stderr = self._run_cmdline(['./bin/luigi', '--module', 'cmdline_test', 'FooBaseClass', '--help'])
         self.assertTrue(stdout.find(b'--FooBaseClass-x') != -1)
         self.assertTrue(stdout.find(b'--x') != -1)
 
+    def test_python_module_help_class(self):
+        returncode, stdout, stderr = self._run_cmdline(['python', '-m', 'luigi', '--module', 'cmdline_test', 'FooBaseClass', '--help'])
+        self.assertTrue(stdout.find(b'--FooBaseClass-x') != -1)
+        self.assertTrue(stdout.find(b'--x') != -1)
 
-class NewStyleParameters822Test(unittest.TestCase):
-    # See https://github.com/spotify/luigi/issues/822
+    def test_bin_luigi_options_before_task(self):
+        args = ['./bin/luigi', '--module', 'cmdline_test', '--no-lock', '--local-scheduler', '--FooBaseClass-x', 'hello', 'FooBaseClass']
+        returncode, stdout, stderr = self._run_cmdline(args)
+        self.assertEqual(0, returncode)
 
-    def test_subclasses(self):
-        ap = luigi.interface.ArgParseInterface()
+    def test_bin_fail_on_unrecognized_args(self):
+        returncode, stdout, stderr = self._run_cmdline(['./bin/luigi', '--no-lock', '--local-scheduler', 'Task', '--unknown-param', 'hiiii'])
+        self.assertNotEqual(0, returncode)
 
-        task, = ap.parse(['--local-scheduler', '--no-lock', 'FooSubClass', '--x', 'xyz', '--FooBaseClass-x', 'xyz'])
-        self.assertEquals(task.x, 'xyz')
+    def test_deps_py_script(self):
+        """
+        Test the deps.py script.
+        """
+        args = 'python luigi/tools/deps.py --module examples.top_artists ArtistToplistToDatabase --date-interval 2015-W10'.split()
+        returncode, stdout, stderr = self._run_cmdline(args)
+        self.assertEqual(0, returncode)
+        self.assertTrue(stdout.find(b'[FileSystem] data/streams_2015_03_04_faked.tsv') != -1)
+        self.assertTrue(stdout.find(b'[DB] localhost') != -1)
 
-        # This won't work because --FooSubClass-x doesn't exist
-        self.assertRaises(BaseException, ap.parse, (['--local-scheduler', '--no-lock', 'FooBaseClass', '--x', 'xyz', '--FooSubClass-x', 'xyz']))
+    def test_bin_mentions_misspelled_task(self):
+        """
+        Test that the error message is informative when a task is misspelled.
 
-    def test_subclasses_2(self):
-        ap = luigi.interface.ArgParseInterface()
+        In particular it should say that the task is misspelled and not that
+        the local parameters do not exist.
+        """
+        returncode, stdout, stderr = self._run_cmdline(['./bin/luigi', '--module', 'cmdline_test', 'HooBaseClass', '--x 5'])
+        self.assertTrue(stderr.find(b'FooBaseClass') != -1)
+        self.assertTrue(stderr.find(b'--x') != 0)
 
-        # https://github.com/spotify/luigi/issues/822#issuecomment-77782714
-        task, = ap.parse(['--local-scheduler', '--no-lock', 'FooBaseClass', '--FooBaseClass-x', 'xyz'])
-        self.assertEquals(task.x, 'xyz')
+    def test_stack_trace_has_no_inner(self):
+        """
+        Test that the stack trace for failing tasks are short
+
+        The stack trace shouldn't contain unreasonably much implementation
+        details of luigi In particular it should say that the task is
+        misspelled and not that the local parameters do not exist.
+        """
+        returncode, stdout, stderr = self._run_cmdline(['./bin/luigi', '--module', 'cmdline_test', 'ATaskThatFails', '--local-scheduler', '--no-lock'])
+        print(stdout)
+
+        self.assertFalse(stdout.find(b"run() got an unexpected keyword argument 'tracking_url_callback'") != -1)
+        self.assertFalse(stdout.find(b'During handling of the above exception, another exception occurred') != -1)
 
 
 if __name__ == '__main__':

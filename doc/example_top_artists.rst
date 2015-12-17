@@ -11,7 +11,8 @@ some other format.
 For the purpose of this exercise, we want to aggregate all streams,
 find the top 10 artists and then put the results into Postgres.
 
-This example is also available in ``examples/top_artists.py``
+This example is also available in
+`examples/top_artists.py <https://github.com/spotify/luigi/blob/master/examples/top_artists.py>`_.
 
 Step 1 - Aggregate Artist Streams
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -40,7 +41,7 @@ Step 1 - Aggregate Artist Streams
                 for artist, count in artist_count.iteritems():
                     print >> out_file, artist, count
 
-Note that this is just a portion of the file *examples/top\_artists.py*.
+Note that this is just a portion of the file ``examples/top_artists.py``.
 In particular, ``Streams`` is defined as a :class:`~luigi.task.Task`,
 acting as a dependency for ``AggregateArtists``.
 In addition, ``luigi.run()`` is called if the script is executed directly,
@@ -60,10 +61,10 @@ There are several pieces of this snippet that deserve more explanation.
    task. This could be anything, including calling subprocesses, performing
    long running number crunching, etc. For some subclasses of
    :class:`~luigi.task.Task` you don't have to implement the ``run``
-   method. For instance, for the :class:`~luigi.hadoop.JobTask`
+   method. For instance, for the :class:`~luigi.contrib.hadoop.JobTask`
    subclass you implement a *mapper* and *reducer* instead.
--  :class:`~luigi.hdfs.HdfsTarget` is a built in class that makes it
-   easy to read/write from/to HDFS. It also makes all file operations
+-  :class:`~luigi.LocalTarget` is a built in class that makes it
+   easy to read/write from/to the local filesystem. It also makes all file operations
    atomic, which is nice in case your script crashes for any reason.
 
 Running this Locally
@@ -73,30 +74,11 @@ Try running this using eg.
 
 ::
 
-    $ python examples/top_artists.py AggregateArtists --local-scheduler --date-interval 2012-06
+    $ cd examples
+    $ luigi --module top_artists AggregateArtists --local-scheduler --date-interval 2012-06
 
-You can also try to view the manual using --help which will give you an
-overview of the options:
-
-::
-
-    usage: wordcount.py [-h] [--local-scheduler] [--scheduler-host SCHEDULER_HOST]
-                        [--lock] [--lock-pid-dir LOCK_PID_DIR] [--workers WORKERS]
-                        [--date-interval DATE_INTERVAL]
-
-    optional arguments:
-      -h, --help            show this help message and exit
-      --local-scheduler     Use local scheduling
-      --scheduler-host SCHEDULER_HOST
-                            Hostname of machine running remote scheduler [default:
-                            localhost]
-      --lock                Do not run if the task is already running
-      --lock-pid-dir LOCK_PID_DIR
-                            Directory to store the pid file [default:
-                            /var/tmp/luigi]
-      --workers WORKERS     Maximum number of parallel tasks to run [default: 1]
-      --date-interval DATE_INTERVAL
-                            AggregateArtists.date_interval
+You can also try to view the manual using `--help` which will give you an
+overview of the options.
 
 Running the command again will do nothing because the output file is
 already created.
@@ -107,7 +89,7 @@ the input files is modified.
 You need to delete the output file
 manually.
 
-The *--local-scheduler* flag tells Luigi not to connect to a scheduler
+The `--local-scheduler` flag tells Luigi not to connect to a scheduler
 server. This is not recommended for other purpose than just testing
 things.
 
@@ -119,11 +101,11 @@ here is how this could look like, instead of the class above.
 
 .. code:: python
 
-    class AggregateArtistsHadoop(luigi.hadoop.JobTask):
+    class AggregateArtistsHadoop(luigi.contrib.hadoop.JobTask):
         date_interval = luigi.DateIntervalParameter()
 
         def output(self):
-            return luigi.hdfs.HdfsTarget("data/artist_streams_%s.tsv" % self.date_interval)
+            return luigi.contrib.hdfs.HdfsTarget("data/artist_streams_%s.tsv" % self.date_interval)
 
         def requires(self):
             return [StreamsHdfs(date) for date in self.date_interval]
@@ -131,13 +113,15 @@ here is how this could look like, instead of the class above.
         def mapper(self, line):
             timestamp, artist, track = line.strip().split()
             yield artist, 1
-            
+
         def reducer(self, key, values):
             yield key, sum(values)
 
-Note that ``luigi.hadoop.JobTask`` doesn't require you to implement a
-``run`` method. Instead, you typically implement a ``mapper`` and
-``reducer`` method.
+Note that :class:`luigi.contrib.hadoop.JobTask` doesn't require you to implement a
+:func:`~luigi.task.Task.run` method. Instead, you typically implement a
+:func:`~luigi.contrib.hadoop.JobTask.mapper` and
+:func:`~luigi.contrib.hadoop.JobTask.reducer` method. *mapper* and *combiner* require
+yielding tuple of only two elements: key and value. Both key and value also may be a tuple.
 
 Step 2 – Find the Top Artists
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -184,7 +168,7 @@ the task will run before *Top10Artists*.
 
 ::
 
-    $ python examples/top_artists.py Top10Artists --local-scheduler --date-interval 2012-07
+    $ luigi --module examples.top_artists Top10Artists --local-scheduler --date-interval 2012-07
 
 This will run both tasks.
 
@@ -223,7 +207,7 @@ building all its upstream dependencies.
 Using the Central Planner
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The *--local-scheduler* flag tells Luigi not to connect to a central scheduler.
+The `--local-scheduler` flag tells Luigi not to connect to a central scheduler.
 This is recommended in order to get started and or for development purposes.
 At the point where you start putting things in production
 we strongly recommend running the central scheduler server.
@@ -231,7 +215,7 @@ In addition to providing locking
 so that the same task is not run by multiple processes at the same time,
 this server also provides a pretty nice visualization of your current work flow.
 
-If you drop the *--local-scheduler* flag,
+If you drop the `--local-scheduler` flag,
 your script will try to connect to the central planner,
 by default at localhost port 8082.
 If you run
@@ -240,17 +224,11 @@ If you run
 
     luigid
 
-in the background and then run
-
-::
-
-    $ python wordcount.py --date 2012-W03
-
-then in fact your script will now do the scheduling through a
-centralized server.
+in the background and then run your task without the ``--local-scheduler`` flag,
+then your script will now schedule through a centralized server.
 You need `Tornado <http://www.tornadoweb.org/>`__ for this to work.
 
-Launching *http://localhost:8082* should show something like this:
+Launching `http://localhost:8082` should show something like this:
 
 .. figure:: web_server.png
    :alt: Web server screenshot

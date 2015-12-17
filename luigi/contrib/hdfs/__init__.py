@@ -20,12 +20,9 @@ Provides access to HDFS using the :py:class:`HdfsTarget`, a subclass of :py:clas
 You can configure what client by setting the "client" config under the "hdfs" section in the configuration, or using the ``--hdfs-client`` command line option.
 "hadoopcli" is the slowest, but should work out of the box. "snakebite" is the fastest, but requires Snakebite to be installed.
 
-Currently (4th May) the :py:mod:`luigi.contrib.hdfs` module is under
-reorganization. We recommend importing the reexports from
-:py:mod:`luigi.contrib.hdfs` instead of the sub-modules, as we're not yet sure
-how the final structure of the sub-modules will be. Eventually this module
-will be empty and you'll have to import directly from the sub modules like
-:py:mod:`luigi.contrib.hdfs.config`.
+Since the hdfs functionality is quite big in luigi, it's split into smaller
+files under ``luigi/contrib/hdfs/*.py``. But for the sake of convenience and
+API stability, everything is reexported under :py:mod:`luigi.contrib.hdfs`.
 """
 
 # config.py
@@ -37,18 +34,22 @@ get_configured_hdfs_client = hdfs_config.get_configured_hdfs_client
 tmppath = hdfs_config.tmppath
 
 
-# clients.py
+# clients
 from luigi.contrib.hdfs import clients as hdfs_clients
-HDFSCliError = hdfs_clients.HDFSCliError
-call_check = hdfs_clients.call_check
-list_path = hdfs_clients.list_path
-HdfsClient = hdfs_clients.HdfsClient
-SnakebiteHdfsClient = hdfs_clients.SnakebiteHdfsClient
-HdfsClientCdh3 = hdfs_clients.HdfsClientCdh3
-HdfsClientApache1 = hdfs_clients.HdfsClientApache1
-create_hadoopcli_client = hdfs_clients.create_hadoopcli_client
+from luigi.contrib.hdfs import error as hdfs_error
+from luigi.contrib.hdfs import snakebite_client as hdfs_snakebite_client
+from luigi.contrib.hdfs import hadoopcli_clients as hdfs_hadoopcli_clients
+from luigi.contrib.hdfs import webhdfs_client as hdfs_webhdfs_client
+HDFSCliError = hdfs_error.HDFSCliError
+call_check = hdfs_hadoopcli_clients.HdfsClient.call_check
+list_path = hdfs_snakebite_client.SnakebiteHdfsClient.list_path
+HdfsClient = hdfs_hadoopcli_clients.HdfsClient
+SnakebiteHdfsClient = hdfs_snakebite_client.SnakebiteHdfsClient
+WebHdfsClient = hdfs_webhdfs_client.WebHdfsClient
+HdfsClientCdh3 = hdfs_hadoopcli_clients.HdfsClientCdh3
+HdfsClientApache1 = hdfs_hadoopcli_clients.HdfsClientApache1
+create_hadoopcli_client = hdfs_hadoopcli_clients.create_hadoopcli_client
 get_autoconfig_client = hdfs_clients.get_autoconfig_client
-client = hdfs_clients.client
 exists = hdfs_clients.exists
 rename = hdfs_clients.rename
 remove = hdfs_clients.remove

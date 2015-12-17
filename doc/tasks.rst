@@ -36,18 +36,18 @@ you can wrap it in a Task class like this:
 
 .. code:: python
 
-    class LogFiles(luigi.Task):
+    class LogFiles(luigi.ExternalTask):
         def output(self):
-            return luigi.hdfs.HdfsTarget('/log')
+            return luigi.contrib.hdfs.HdfsTarget('/log')
 
 This also makes it easier to add parameters:
 
 .. code:: python
 
-    class LogFiles(luigi.Task):
+    class LogFiles(luigi.ExternalTask):
         date = luigi.DateParameter()
         def output(self):
-            return luigi.hdfs.HdfsTarget(self.date.strftime('/log/%Y-%m-%d'))
+            return luigi.contrib.hdfs.HdfsTarget(self.date.strftime('/log/%Y-%m-%d'))
 
 .. _Task.output:
 
@@ -55,7 +55,7 @@ Task.output
 ~~~~~~~~~~~
 
 The :func:`~luigi.task.Task.output` method returns one or more :class:`~luigi.target.Target` objects.
-Similarly to requires, can return wrap them up in any way that's convenient for you.
+Similarly to requires, you can return them wrapped up in any way that's convenient for you.
 However we recommend that any :class:`~luigi.task.Task` only return one single :class:`~luigi.target.Target` in output.
 If multiple outputs are returned,
 atomicity will be lost unless the :class:`~luigi.task.Task` itself can ensure that each :class:`~luigi.target.Target` is atomically created.
@@ -66,7 +66,7 @@ atomicity will be lost unless the :class:`~luigi.task.Task` itself can ensure th
     class DailyReport(luigi.Task):
         date = luigi.DateParameter()
         def output(self):
-            return luigi.hdfs.HdfsTarget(self.date.strftime('/reports/%Y-%m-%d'))
+            return luigi.contrib.hdfs.HdfsTarget(self.date.strftime('/reports/%Y-%m-%d'))
         # ...
 
 .. _Task.run:
@@ -99,7 +99,7 @@ An example:
             f = self.input().open('r') # this will return a file stream that reads from "xyz"
             g = self.output().open('w')
             for line in f:
-                g.write('%s\n', ''.join(reversed(line.strip().split()))
+                g.write('%s\n', ''.join(reversed(line.strip().split())))
             g.close() # needed because files are atomic
 
 
@@ -108,7 +108,7 @@ An example:
 Task.input
 ~~~~~~~~~~
 
-As seen in the example above, :class:`~luigi.task.Task` is a wrapper around Task.requires_ that
+As seen in the example above, :func:`~luigi.task.Task.input` is a wrapper around Task.requires_ that
 returns the corresponding Target objects instead of Task objects.
 Anything returned by Task.requires_ will be transformed, including lists,
 nested dicts, etc.
@@ -176,7 +176,7 @@ This allows you to effortlessly subscribe to events only from a specific class (
         """
         ...
 
-    @luigi.hadoop.JobTask.event_handler(luigi.Event.FAILURE)
+    @luigi.contrib.hadoop.JobTask.event_handler(luigi.Event.FAILURE)
     def mourn_failure(task, exception):
         """Will be called directly after a failed execution
            of `run` on any JobTask subclass
@@ -191,7 +191,7 @@ But I just want to run a Hadoop job?
 
 The Hadoop code is integrated in the rest of the Luigi code because
 we really believe almost all Hadoop jobs benefit from being part of some sort of workflow.
-However, in theory, nothing stops you from using the :class:`~luigi.hadoop.JobTask` class (and also :class:`~luigi.hdfs.HdfsTarget`)
+However, in theory, nothing stops you from using the :class:`~luigi.contrib.hadoop.JobTask` class (and also :class:`~luigi.contrib.hdfs.target.HdfsTarget`)
 without using the rest of Luigi.
 You can simply run it manually using
 
@@ -199,11 +199,11 @@ You can simply run it manually using
 
     MyJobTask('abc', 123).run()
 
-You can use the hdfs.HdfsTarget class anywhere by just instantiating it:
+You can use the hdfs.target.HdfsTarget class anywhere by just instantiating it:
 
 .. code:: python
 
-    t = luigi.hdfs.HdfsTarget('/tmp/test.gz', format=format.Gzip)
+    t = luigi.contrib.hdfs.target.HdfsTarget('/tmp/test.gz', format=format.Gzip)
     f = t.open('w')
     # ...
     f.close() # needed
@@ -214,7 +214,7 @@ Task priority
 ~~~~~~~~~~~~~
 
 The scheduler decides which task to run next from
-the set of all task that have all their dependencies met.
+the set of all tasks that have all their dependencies met.
 By default, this choice is pretty arbitrary,
 which is fine for most workflows and situations.
 

@@ -2,14 +2,11 @@
    :alt: Luigi Logo
    :align: center
 
-About Luigi
------------
-
 .. image:: https://img.shields.io/travis/spotify/luigi/master.svg?style=flat
     :target: https://travis-ci.org/spotify/luigi
  
-.. image:: https://img.shields.io/coveralls/spotify/luigi/master.svg?style=flat
-    :target: https://coveralls.io/r/spotify/luigi?branch=master
+.. image:: https://img.shields.io/codecov/c/github/spotify/luigi/master.svg?style=flat
+    :target: https://codecov.io/gh/spotify/luigi?branch=master
  
 .. image:: https://landscape.io/github/spotify/luigi/master/landscape.svg?style=flat
    :target: https://landscape.io/github/spotify/luigi/master
@@ -19,14 +16,24 @@ About Luigi
  
 .. image:: https://img.shields.io/pypi/l/luigi.svg?style=flat
    :target: https://pypi.python.org/pypi/luigi
- 
-.. image:: https://pypip.in/py_versions/luigi/badge.svg?style=flat
-   :target: https://pypi.python.org/pypi/luigi
 
-Luigi is a Python package that helps you build complex pipelines of
-batch jobs. It handles dependency resolution, workflow management,
-visualization, handling failures, command line integration, and much
-more.
+Luigi is a Python (2.7, 3.3, 3.4) package that helps you build complex pipelines of batch
+jobs. It handles dependency resolution, workflow management, visualization,
+handling failures, command line integration, and much more.
+
+Getting Started
+---------------
+
+Run ``pip install luigi`` to install the latest stable version from `PyPI
+<https://pypi.python.org/pypi/luigi>`_. Documentation for the latest release is
+hosted `here <http://luigi.readthedocs.org/en/stable/>`__.
+
+For the bleeding edge code, ``pip install
+git+https://github.com/spotify/luigi.git``. Bleeding edge documentation can be
+found `here <http://luigi.readthedocs.org/en/latest/>`__.
+
+Background
+----------
 
 The purpose of Luigi is to address all the plumbing typically associated
 with long-running batch processes. You want to chain many tasks,
@@ -63,6 +70,15 @@ and local files that ensures all file system operations are atomic. This
 is important because it means your data pipeline will not crash in a
 state containing partial data.
 
+Visualiser page
+---------------
+
+The luigi server comes with a web interface too, so you can search and filter
+among all your tasks.
+
+.. figure:: https://raw.githubusercontent.com/spotify/luigi/master/doc/visualiser_front_page.png
+   :alt: Visualiser page
+
 Dependency graph example
 ------------------------
 
@@ -77,17 +93,8 @@ build up data files.
 .. figure:: https://raw.githubusercontent.com/spotify/luigi/master/doc/user_recs.png
    :alt: Dependency graph
 
-Background
+Philosophy
 ----------
-
-We use Luigi internally at `Spotify <https://www.spotify.com/us/>`_ to run
-thousands of tasks every day, organized in complex dependency graphs.
-Most of these tasks are Hadoop jobs. Luigi provides an infrastructure
-that powers all kinds of stuff including recommendations, toplists, A/B
-test analysis, external reports, internal dashboards, etc. Luigi grew
-out of the realization that powerful abstractions for batch processing
-can help programmers focus on the most important bits and leave the rest
-(the boilerplate) to the framework.
 
 Conceptually, Luigi is similar to `GNU
 Make <http://www.gnu.org/software/make/>`_ where you have certain tasks
@@ -106,63 +113,49 @@ trigger things not in Python, such as running
 `Pig scripts <http://luigi.readthedocs.org/en/latest/api/luigi.contrib.pig.html>`_
 or `scp'ing files <http://luigi.readthedocs.org/en/latest/api/luigi.contrib.ssh.html>`_.
 
-Installing
-----------
-
-Downloading and running ``python setup.py install`` should be enough. Note
-that you probably want `Tornado <http://www.tornadoweb.org/>`_. See
-`Configuration <http://luigi.readthedocs.org/en/latest/configuration.html>`_ for how to configure Luigi.
-
-Getting Started
----------------
-
-Take a look at the `Example workflow
-<http://luigi.readthedocs.org/en/latest/example_top_artists.html>`_ and `Building workflows
-<http://luigi.readthedocs.org/en/latest/workflows.html>`_ which explains some of
-the most important concepts.
-
-Documentation
--------------
-
-`Full documentation <http://luigi.readthedocs.org/>`_ is available at Read the Docs, including the
-`Luigi package documentation <http://luigi.readthedocs.org/en/latest/api/luigi.html>`_.
-
 Who uses Luigi?
 ---------------
 
-Several companies have written blog posts or presentation about Luigi:
+We use Luigi internally at `Spotify <https://www.spotify.com/us/>`_ to run
+thousands of tasks every day, organized in complex dependency graphs.
+Most of these tasks are Hadoop jobs. Luigi provides an infrastructure
+that powers all kinds of stuff including recommendations, toplists, A/B
+test analysis, external reports, internal dashboards, etc.
+
+Since luigi is open source and without any registration walls, the exact number
+of luigi users is unknown. But based on the number of unique contributors, we
+expect hundreds of enterprises to use it. Some users have written blog posts
+or held presentations about Luigi:
 
 * `Spotify (NYC Data Science) <http://www.slideshare.net/erikbern/luigi-presentation-nyc-data-science>`_
 * `Foursquare <http://www.slideshare.net/OpenAnayticsMeetup/luigi-presentation-17-23199897>`_
-* `Mortar Data <https://help.mortardata.com/technologies/luigi>`_
+* `Mortar Data <http://help.mortardata.com/technologies/luigi>`_
 * `Stripe <http://www.slideshare.net/PyData/python-as-part-of-a-production-machine-learning-stack-by-michael-manapat-pydata-sv-2014>`_
 * `Asana <https://eng.asana.com/2014/11/stable-accessible-data-infrastructure-startup/>`_
 * `Buffer <https://overflow.bufferapp.com/2014/10/31/buffers-new-data-architecture/>`_
 * `SeatGeek <http://chairnerd.seatgeek.com/building-out-the-seatgeek-data-pipeline/>`_
 * `Treasure Data <http://blog.treasuredata.com/blog/2015/02/25/managing-the-data-pipeline-with-git-luigi/>`_
+* `Growth Intelligence <http://www.slideshare.net/growthintel/a-beginners-guide-to-building-data-pipelines-with-luigi>`_
+* `AdRoll <http://tech.adroll.com/blog/data/2015/09/22/data-pipelines-docker.html>`_
 
-Please let us know if your company wants to be featured on this list!
-
-Getting Help
-------------
-
-* Find us on `#luigi` on freenode.
-* Subscribe to the `luigi-user <http://groups.google.com/group/luigi-user/>`_
-  group and ask a question.
+We're more than happy to have your company added here. Just send a PR on GitHub.
 
 External links
 --------------
 
-* `Mailing List <https://groups.google.com/d/forum/luigi-user/>`_ (Google Groups)
-* `Releases <https://pypi.python.org/pypi/luigi>`_ (PyPi)
+* `Mailing List <https://groups.google.com/d/forum/luigi-user/>`_ for discussions and asking questions. (Google Groups)
+* `Releases <https://pypi.python.org/pypi/luigi>`_ (PyPI)
 * `Source code <https://github.com/spotify/luigi>`_ (Github)
+* `Hubot Integration <https://github.com/houzz/hubot-luigi>`_ plugin for Slack, Hipchat, etc (Github)
 
 Authors
 -------
 
 Luigi was built at `Spotify <https://www.spotify.com/us/>`_, mainly by
-`Erik Bernhardsson <https://github.com/erikbern>`_ and `Elias
-Freider <https://github.com/freider>`_, but
-`many other people <https://github.com/spotify/luigi/graphs/contributors>`_
-have contributed.
+`Erik Bernhardsson <https://github.com/erikbern>`_ and
+`Elias Freider <https://github.com/freider>`_.
+`Many other people <https://github.com/spotify/luigi/graphs/contributors>`_
+have contributed since open sourcing in late 2012.
+`Arash Rouhani <https://github.com/tarrasch>`_ is currently the chief
+maintainer of Luigi.
 

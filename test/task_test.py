@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 
 import luigi
 import luigi.task
+from luigi.task_register import load_task
 
 
 class DummyTask(luigi.Task):
@@ -32,7 +33,12 @@ class DummyTask(luigi.Task):
     date_param = luigi.DateParameter()
     datehour_param = luigi.DateHourParameter()
     timedelta_param = luigi.TimeDeltaParameter()
-    list_param = luigi.Parameter(is_list=True)
+    insignificant_param = luigi.Parameter(significant=False)
+
+
+class DefaultInsignificantParamTask(luigi.Task):
+    insignificant_param = luigi.Parameter(significant=False, default='value')
+    necessary_param = luigi.Parameter(significant=False)
 
 
 class TaskTest(unittest.TestCase):
@@ -49,29 +55,35 @@ class TaskTest(unittest.TestCase):
             date_param=datetime(2014, 9, 13).date(),
             datehour_param=datetime(2014, 9, 13, 9),
             timedelta_param=timedelta(44),  # doesn't support seconds
-            list_param=['in', 'flames'])
+            insignificant_param='test')
 
         original = DummyTask(**params)
         other = DummyTask.from_str_params(original.to_str_params())
         self.assertEqual(original, other)
 
-    def test_id_to_name_and_params(self):
-        task_id = "InputText(date=2014-12-29)"
-        (name, params) = luigi.task.id_to_name_and_params(task_id)
-        self.assertEquals(name, "InputText")
-        self.assertEquals(params, dict(date="2014-12-29"))
+    def test_task_from_str_insignificant(self):
+        params = {'necessary_param': 'needed'}
+        original = DefaultInsignificantParamTask(**params)
+        other = DefaultInsignificantParamTask.from_str_params(params)
+        self.assertEqual(original, other)
 
-    def test_id_to_name_and_params_multiple_args(self):
-        task_id = "InputText(date=2014-12-29,foo=bar)"
-        (name, params) = luigi.task.id_to_name_and_params(task_id)
-        self.assertEquals(name, "InputText")
-        self.assertEquals(params, dict(date="2014-12-29", foo="bar"))
+    def test_task_missing_necessary_param(self):
+        with self.assertRaises(luigi.parameter.MissingParameterException):
+            DefaultInsignificantParamTask.from_str_params({})
 
-    def test_id_to_name_and_params_list_args(self):
-        task_id = "InputText(date=2014-12-29,foo=[bar,baz-foo])"
-        (name, params) = luigi.task.id_to_name_and_params(task_id)
-        self.assertEquals(name, "InputText")
-        self.assertEquals(params, dict(date="2014-12-29", foo=["bar", "baz-foo"]))
+    def test_external_tasks_loadable(self):
+        task = load_task("luigi", "ExternalTask", {})
+        assert(isinstance(task, luigi.ExternalTask))
+
+    def test_flatten(self):
+        flatten = luigi.task.flatten
+        self.assertEqual(sorted(flatten({'a': 'foo', 'b': 'bar'})), ['bar', 'foo'])
+        self.assertEqual(sorted(flatten(['foo', ['bar', 'troll']])), ['bar', 'foo', 'troll'])
+        self.assertEqual(flatten('foo'), ['foo'])
+        self.assertEqual(flatten(42), [42])
+        self.assertEqual(flatten((len(i) for i in ["foo", "troll"])), [3, 5])
+        self.assertRaises(TypeError, flatten, (len(i) for i in ["foo", "troll", None]))
+
 
 if __name__ == '__main__':
     unittest.main()

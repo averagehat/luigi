@@ -35,7 +35,8 @@ class CascadingClient(object):
     # methods here. If you want full control of which methods that should be
     # created, pass the kwarg to the constructor.
     ALL_METHOD_NAMES = ['exists', 'rename', 'remove', 'chmod', 'chown',
-                        'count', 'copy', 'get', 'put', 'mkdir', 'listdir',
+                        'count', 'copy', 'get', 'put', 'mkdir', 'list', 'listdir',
+                        'getmerge',
                         'isdir',
                         'rename_dont_move',
                         'touchz',
@@ -71,5 +72,5 @@ class CascadingClient(object):
                 if is_last_iteration:
                     raise
                 else:
-                    logger.exception('The %s failed to %s, using fallback class %s',
-                                     client.__class__.__name__, method_name, self.clients[i + 1].__class__.__name__)
+                    logger.warning('The %s failed to %s, using fallback class %s',
+                                   client.__class__.__name__, method_name, self.clients[i + 1].__class__.__name__)

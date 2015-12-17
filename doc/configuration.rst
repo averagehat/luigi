@@ -1,11 +1,17 @@
 Configuration
 =============
 
-All configuration can be done by adding a configuration file named
-client.cfg to your current working directory or /etc/luigi (although
-this is further configurable). The config file is broken into sections,
-each controlling a different part of the config. Example
-/etc/luigi/client.cfg:
+All configuration can be done by adding configuration files. They are looked for in:
+
+ * ``/etc/luigi/client.cfg``
+ * ``luigi.cfg`` (or its legacy name ``client.cfg``) in your current working directory
+ * ``LUIGI_CONFIG_PATH`` environment variable
+
+in increasing order of preference. The order only matters in case of key conflicts (see docs for ConfigParser_). These files are meant for both the client and ``luigid``. If you decide to specify your own configuration you should make sure that both the client and ``luigid`` load it properly.
+
+.. _ConfigParser: https://docs.python.org/2/library/configparser.html
+
+The config file is broken into sections, each controlling a different part of the config. Example configuration file:
 
 ::
 
@@ -17,25 +23,57 @@ each controlling a different part of the config. Example
     default-scheduler-host: luigi-host.mycompany.foo
     error-email: foo@bar.baz
 
-By default, all parameters will be overridden by matching values in the
-configuration file. For instance if you have a Task definition:
+
+.. _ParamConfigIngestion:
+
+Parameters from config Ingestion
+--------------------------------
+
+All parameters can be overridden from configuration files. For instance if you
+have a Task definition:
 
 .. code:: python
 
-    class DailyReport(luigi.hadoop.JobTask):
+    class DailyReport(luigi.contrib.hadoop.JobTask):
         date = luigi.DateParameter(default=datetime.date.today())
         # ...
 
-Then you can override the default value for date by providing it in the
-configuration:
+Then you can override the default value for ``DailyReport().date`` by providing
+it in the configuration:
 
 ::
 
     [DailyReport]
     date: 2012-01-01
 
-You can also use ``config_path`` as an argument to the ``Parameter`` if
-you want to use a specific section in the config.
+.. _ConfigClasses:
+
+Configuration classes
+*********************
+
+Using the :ref:`ParamConfigIngestion` method. We derive the
+conventional way to do global configuration. Imagine this configuration.
+
+::
+
+    [mysection]
+    option: hello
+    intoption: 123
+
+
+We can create a :py:class:`~luigi.Config` class:
+
+.. code:: python
+
+    import luigi
+
+    # Config classes should be camel cased
+    class mysection(luigi.Config):
+        option = luigi.Parameter(default='world')
+        intoption = luigi.IntParameter(default=555)
+
+    mysection().option
+    mysection().intoption
 
 
 Configurable options
@@ -57,6 +95,15 @@ default-scheduler-host
 default-scheduler-port
   Port of the remote scheduler api process. Defaults to 8082.
 
+default-scheduler-url
+  Full path to remote scheduler. Defaults to ``http://localhost:8082/``.
+  For TLS support use the URL scheme: ``https``,
+  example: ``https://luigi.example.com:443/``
+  (Note: you will have to terminate TLS using an HTTP proxy)
+  You can also use this to connect to a local Unix socket using the
+  non-standard URI scheme: ``http+unix``
+  example: ``http+unix://%2Fvar%2Frun%2Fluigid%2Fluigid.sock/``
+
 email-prefix
   Optional prefix to add to the subject line of all e-mails. For
   example, setting this to "[LUIGI]" would change the subject line of an
@@ -68,14 +115,22 @@ email-sender
   Default value: luigi-client@<server_name>
 
 email-type
-  Type of e-mail to send. Valid values are "plain" and "html". When set
-  to html, tracebacks are wrapped in <pre> tags to get fixed-width font.
+  Type of e-mail to send. Valid values are "plain", "html" and "none".
+  When set to html, tracebacks are wrapped in <pre> tags to get fixed-
+  width font.
+
+  New in version 2.1.0: When set to none, no e-mails will be sent.
+
   Default value is plain.
 
 error-email
   Recipient of all error e-mails. If this is not set, no error e-mails
-  are sent when luigi crashes. If luigi is run from the command line, no
-  e-mails will be sent unless output is redirected to a file.
+  are sent when luigi crashes unless the crashed job has owners set. If
+  luigi is run from the command line, no e-mails will be sent unless
+  output is redirected to a file.
+
+  Set it to SNS Topic ARN if you want to receive notifications through
+  Amazon SNS. See also section `[email]`_.
 
 hdfs-tmp-dir
   Base directory in which to store temporary files on hdfs. Defaults to
@@ -100,9 +155,19 @@ max-shown-tasks
   .. versionadded:: 1.0.20
 
   The maximum number of tasks returned in a task_list api call. This
-  will restrict the number of tasks shown in any section in the
+  will restrict the number of tasks shown in task lists in the
   visualiser. Small values can alleviate frozen browsers when there are
   too many done tasks. This defaults to 100000 (one hundred thousand).
+
+max-graph-nodes
+  .. versionadded:: 2.0.0
+
+  The maximum number of nodes returned by a dep_graph or
+  inverse_dep_graph api call. Small values can greatly speed up graph
+  display in the visualiser by limiting the number of nodes shown. Some
+  of the nodes that are not sent to the visualiser will still show up as
+  dependencies of nodes that were sent. These nodes are given TRUNCATED
+  status.
 
 no_configure_logging
   If true, logging is not configured. Defaults to false.
@@ -154,9 +219,6 @@ smtp_timeout
   Optionally sets the number of seconds after which smtp attempts should
   time out.
 
-tmp-dir
-  DEPRECATED - use hdfs-tmp-dir instead
-
 worker-count-uniques
   If true, workers will only count unique pending jobs when deciding
   whether to stay alive. So if a worker can't get a job to run and other
@@ -196,6 +258,11 @@ worker-wait-interval
   for another job after the scheduler has said that it does not have any
   available jobs.
 
+worker-wait-jitter
+  Size of jitter to add to the worker wait interval such that the multiple
+  workers do not ask the scheduler for another job at the same time.
+  Default: 5.0
+
 
 [elasticsearch]
 ---------------
@@ -212,20 +279,25 @@ marker-doc-type
 [email]
 -------
 
-These parameters control sending error e-mails through Amazon SES.
+General parameters
 
-AWS_ACCESS_KEY
-  Your AWS access key
-
-AWS_SECRET_KEY
-  Your AWS secret key
-
-region
-  Your AWS region. Defaults to us-east-1.
+force-send
+  If true, e-mails are sent in all run configurations (even if stdout is
+  connected to a tty device).  Defaults to False.
 
 type
-  If set to "ses", error e-mails will be send through Amazon SES.
-  Otherwise, e-mails are sent via smtp.
+  Valid values are "smtp", "sendgrid", "ses" and "sns". SES and SNS are
+  services of Amazon web services. SendGrid is an email delivery service.
+  The default value is "smtp".
+
+In order to send messages through Amazon SNS or SES set up your AWS config
+files or run luigi on an EC2 instance with proper instance profile.
+
+These parameters control sending error e-mails through SendGrid.
+
+SENDGRID_USERNAME
+
+SENDGRID_PASSWORD
 
 
 [hadoop]
@@ -260,9 +332,11 @@ Parameters controlling the use of snakebite to speed up hdfs queries.
 
 client
   Client to use for most hadoop commands. Options are "snakebite",
-  "snakebite_with_hadoopcli_fallback", and "hadoopcli". Snakebite is
-  much faster, so use of it is encouraged. Using snakebite requires it
-  to be installed separately on the machine. Defaults to "hadoopcli".
+  "snakebite_with_hadoopcli_fallback", "webhdfs" and "hadoopcli". Snakebite is
+  much faster, so use of it is encouraged. webhdfs is fast and works with
+  Python 3 as well, but has not been used that much in the wild.
+  Both snakebite and webhdfs requires you to install it separately on
+  the machine. Defaults to "hadoopcli".
 
 client_version
   Optionally specifies hadoop client version for snakebite.
@@ -281,6 +355,9 @@ namenode_port
 snakebite_autoconfig
   If true, attempts to automatically detect the host and port of the
   namenode for snakebite queries. Defaults to false.
+  
+tmp_dir
+  Path to where luigi will put temporary files on hdfs
 
 
 [hive]
@@ -360,6 +437,47 @@ hive resources and 1 mysql resource:
 Note that it was not necessary to specify the 1 for mysql here, but it
 is good practice to do so when you have a fixed set of resources.
 
+.. _retcode-config:
+
+[retcode]
+----------
+
+Configure return codes for the luigi binary. In the case of multiple return
+codes that could apply, for example a failing task and missing data, the
+*numerically greatest* return code is returned.
+
+We recommend that you copy this set of exit codes to your ``luigi.cfg`` file:
+
+::
+
+  [retcode]
+  # The following return codes are the recommended exit codes for luigi
+  # They are in increasing level of severity (for most applications)
+  already_running: 10
+  missing_data: 20
+  task_failed: 30
+  unhandled_exception: 40
+
+unhandled_exception
+  For exceptions during scheduling (if you raise from the ``complete()`` or
+  ``requires()`` methods for instance) or for internal luigi errors.  Defaults
+  to 4, since this type of error probably will not recover over time.
+missing_data
+  For when an :py:class:`~luigi.task.ExternalTask` is not complete, and this
+  caused the worker to give up.  As an alternative to fiddling with this, see
+  the [worker] keep_alive option.
+task_failed
+  For signaling that there were last known to have failed. Typically because
+  some exception have been raised.
+already_running
+  This can happen in two different cases. Either the local lock file was taken
+  at the time the invocation starts up. Or, the central scheduler have reported
+  that some tasks could not have been run, because other workers are already
+  running the tasks.
+
+If you customize return codes, prefer to set them in range 128 to 255 to avoid
+conflicts. Return codes in range 0 to 127 are reserved for possible future use
+by Luigi contributors.
 
 [scalding]
 ----------
@@ -470,6 +588,9 @@ deploy-mode
 jars
     Comma-separated list of local jars to include on the driver and executor classpaths. Default: Spark default
 
+packages
+    Comma-separated list of packages to link to on the driver and executors
+
 py-files
     Comma-separated list of .zip, .egg, or .py files to place on the PYTHONPATH for Python apps. Default: Spark default
 
@@ -552,3 +673,25 @@ Parameters controlling storage of task history in a database
 db_connection
   Connection string for connecting to the task history db using
   sqlalchemy.
+
+
+[execution_summary]
+-------------------
+
+Parameters controlling execution summary of a worker
+
+summary-length
+  Maximum number of tasks to show in an execution summary.  If the value is 0,
+  then all tasks will be displayed.  Default value is 5.
+
+
+[webhdfs]
+---------
+
+port
+  The port to use for webhdfs. The normal namenode port is probably on a
+  different port from this one.
+user
+  Perform file system operations as the specified user instead of $USER.  Since
+  this parameter is not honored by any of the other hdfs clients, you should
+  think twice before setting this parameter.

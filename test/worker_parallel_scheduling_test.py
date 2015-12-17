@@ -15,13 +15,37 @@
 # limitations under the License.
 #
 
+import contextlib
+import gc
+import os
 import pickle
 import time
 from helpers import unittest
 
 import luigi
 import mock
+import psutil
 from luigi.worker import Worker
+
+
+def running_children():
+    children = set()
+    process = psutil.Process(os.getpid())
+    for child in process.children():
+        if child.is_running():
+            children.add(child.pid)
+    return children
+
+
+@contextlib.contextmanager
+def pause_gc():
+    if not gc.isenabled():
+        yield
+    try:
+        gc.disable()
+        yield
+    finally:
+        gc.enable()
 
 
 class SlowCompleteWrapper(luigi.WrapperTask):
@@ -76,7 +100,16 @@ class ParallelSchedulingTest(unittest.TestCase):
         self.w = Worker(scheduler=self.sch, worker_id='x')
 
     def added_tasks(self, status):
-        return [args[1] for args, kw in self.sch.add_task.call_args_list if kw['status'] == status]
+        return [kw['task_id'] for args, kw in self.sch.add_task.call_args_list if kw['status'] == status]
+
+    def test_children_terminated(self):
+        before_children = running_children()
+        with pause_gc():
+            self.w.add(
+                OverlappingSelfDependenciesTask(5, 2),
+                multiprocess=True,
+            )
+            self.assertLessEqual(running_children(), before_children)
 
     def test_multiprocess_scheduling_with_overlapping_dependencies(self):
         self.w.add(OverlappingSelfDependenciesTask(5, 2), True)
@@ -104,7 +137,7 @@ class ParallelSchedulingTest(unittest.TestCase):
     @mock.patch('luigi.notifications.send_error_email')
     def test_raise_exception_in_complete(self, send):
         self.w.add(ExceptionCompleteTask(), multiprocess=True)
-        send.assert_called_once()
+        send.check_called_once()
         self.assertEqual(0, self.sch.add_task.call_count)
         self.assertTrue('assert False' in send.call_args[0][1])
 
@@ -120,14 +153,14 @@ class ParallelSchedulingTest(unittest.TestCase):
 
         # verify this can run async
         self.w.add(UnpicklableExceptionTask(), multiprocess=True)
-        send.assert_called_once()
+        send.check_called_once()
         self.assertEqual(0, self.sch.add_task.call_count)
         self.assertTrue('raise UnpicklableException()' in send.call_args[0][1])
 
     @mock.patch('luigi.notifications.send_error_email')
     def test_raise_exception_in_requires(self, send):
         self.w.add(ExceptionRequiresTask(), multiprocess=True)
-        send.assert_called_once()
+        send.check_called_once()
         self.assertEqual(0, self.sch.add_task.call_count)
 
 

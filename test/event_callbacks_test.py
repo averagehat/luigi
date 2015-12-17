@@ -15,7 +15,6 @@
 # limitations under the License.
 #
 
-import random
 from helpers import unittest
 
 import luigi
@@ -35,6 +34,15 @@ class EmptyTask(Task):
     def run(self):
         if self.fail:
             raise DummyException()
+
+
+class TaskWithBrokenDependency(Task):
+
+    def requires(self):
+        raise DummyException()
+
+    def run(self):
+        pass
 
 
 class TaskWithCallback(Task):
@@ -85,6 +93,22 @@ class TestEventCallbacks(unittest.TestCase):
     def test_failure(self):
         t, successes, failures, exceptions = self._run_empty_task(True)
         self.assertEqual(successes, [])
+        self.assertEqual(failures, [t])
+        self.assertEqual(len(exceptions), 1)
+        self.assertTrue(isinstance(exceptions[0], DummyException))
+
+    def test_broken_dependency(self):
+        failures = []
+        exceptions = []
+
+        @TaskWithBrokenDependency.event_handler(Event.BROKEN_TASK)
+        def failure(task, exception):
+            failures.append(task)
+            exceptions.append(exception)
+
+        t = TaskWithBrokenDependency()
+        build([t], local_scheduler=True)
+
         self.assertEqual(failures, [t])
         self.assertEqual(len(exceptions), 1)
         self.assertTrue(isinstance(exceptions[0], DummyException))
@@ -195,7 +219,9 @@ class TestDependencyEvents(unittest.TestCase):
     def _run_test(self, task, expected_events):
         actual_events = {}
 
-        # yucky to create separate callbacks; would be nicer if the callback received an instance of a subclass of Event, so one callback could accumulate all types
+        # yucky to create separate callbacks; would be nicer if the callback
+        # received an instance of a subclass of Event, so one callback could
+        # accumulate all types
         @luigi.Task.event_handler(Event.DEPENDENCY_DISCOVERED)
         def callback_dependency_discovered(*args):
             actual_events.setdefault(Event.DEPENDENCY_DISCOVERED, set()).add(tuple(map(lambda t: t.task_id, args)))
@@ -255,4 +281,13 @@ class TestDependencyEvents(unittest.TestCase):
                 ('D(param=3)',),
             ]),
         })
-        self.assertEqual(eval_contents(A().output()), ['A(param=1)', ['B(param=1)', ['C(param=1)', ['D(param=1)'], ['D(param=2)']]], ['B(param=2)', ['C(param=2)', ['D(param=2)'], ['D(param=3)']]]])
+        self.assertEqual(eval_contents(A().output()),
+                         ['A(param=1)',
+                             ['B(param=1)',
+                                 ['C(param=1)',
+                                     ['D(param=1)'],
+                                     ['D(param=2)']]],
+                             ['B(param=2)',
+                                 ['C(param=2)',
+                                     ['D(param=2)'],
+                                     ['D(param=3)']]]])

@@ -1,9 +1,11 @@
 .coverage.*
 doc/api/*.rst
+test/gcloud-credentials.json
 
 .nicesetup
 
 client.cfg
+luigi.cfg
 
 hadoop_test.py
 minicluster.py
@@ -39,7 +41,8 @@ develop-eggs/
 dist/
 downloads/
 eggs/
-lib/
+# NOTE : lib/ prevents inclusion of static/visualiser/lib
+#lib/
 lib64/
 parts/
 sdist/
@@ -62,9 +65,11 @@ pip-delete-this-directory.txt
 htmlcov/
 .tox/
 .coverage
+.coverage.*
 .cache
 nosetests.xml
 coverage.xml
+my_dir
 
 # Translations
 *.mo

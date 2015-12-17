@@ -72,7 +72,7 @@ class InputPipeProcessWrapper(object):
             try:
                 input_pipe.fileno()
             except AttributeError:
-                # subprocess require a fileno to work, if not reprsent we copy to disk first
+                # subprocess require a fileno to work, if not present we copy to disk first
                 self._original_input = False
                 f = tempfile.NamedTemporaryFile('wb', prefix='luigi-process_tmp', delete=False)
                 self._tmp_file = f.name
@@ -144,7 +144,7 @@ class InputPipeProcessWrapper(object):
             self._finish()
 
     def __getattr__(self, name):
-        if name == '_process':
+        if name in ['_process', '_input_pipe']:
             raise AttributeError(name)
         try:
             return getattr(self._process.stdout, name)
@@ -225,7 +225,7 @@ class OutputPipeProcessWrapper(object):
         self._finish()
 
     def __getattr__(self, name):
-        if name == '_process':
+        if name in ['_process', '_output_pipe']:
             raise AttributeError(name)
         try:
             return getattr(self._process.stdin, name)

@@ -15,37 +15,32 @@
 # limitations under the License.
 #
 
-from helpers import unittest
+from helpers import LuigiTestCase
 
 import luigi
 import luigi.interface
+import tempfile
+import re
+
+_testing_glob_var = None
 
 
-class ExtraArgs(luigi.Task):
-    blah = luigi.Parameter(is_global=True, default=444)
-
-
-class CmdlineTest(unittest.TestCase):
+class CmdlineTest(LuigiTestCase):
 
     def test_dynamic_loading(self):
-        interface = luigi.interface.ArgParseInterface()
-        self.assertRaises(SystemExit, interface.parse, (['FooTask', '--blah', 'xyz', '--x', '123'],))  # should raise since it's not imported
+        with tempfile.NamedTemporaryFile(dir='test/', prefix="_foo_module", suffix='.py') as temp_module_file:
+            temp_module_file.file.write(b'''
+import luigi
 
-        interface = luigi.interface.DynamicArgParseInterface()
-        tasks = interface.parse(['--module', 'foo_module', 'FooTask', '--blah', 'xyz', '--x', '123'])
+class FooTask(luigi.Task):
+    x = luigi.IntParameter()
 
-        self.assertEqual(ExtraArgs().blah, 'xyz')
+    def run(self):
+        luigi._testing_glob_var = self.x
+''')
+            temp_module_file.file.flush()
+            temp_module_path = temp_module_file.name
+            temp_module_name = re.search(r'/(_foo_module.*).py', temp_module_path).group(1)
+            luigi.interface.run(['--module', temp_module_name, 'FooTask', '--x', '123', '--local-scheduler', '--no-lock'])
 
-        self.assertEqual(len(tasks), 1)
-
-        task, = tasks
-        self.assertEqual(task.x, 123)
-
-        import foo_module
-        self.assertEqual(task.__class__, foo_module.FooTask)
-        self.assertEqual(task, foo_module.FooTask(x=123))
-
-    def test_run(self):
-        # TODO: this needs to run after the existing module, since by now foo_module is already imported
-
-        luigi.run(['--local-scheduler', '--no-lock', '--module', 'foo_module', 'FooTask', '--x', '100'], use_dynamic_argparse=True)
+            self.assertEqual(luigi._testing_glob_var, 123)

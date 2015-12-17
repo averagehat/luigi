@@ -158,7 +158,7 @@ class HiveCommandClient(HiveClient):
         """
         Turns a dict into the a Hive partition specification string.
         """
-        return ','.join(["{0}='{1}'".format(k, v) for (k, v) in
+        return ','.join(["`{0}`='{1}'".format(k, v) for (k, v) in
                          sorted(six.iteritems(partition), key=operator.itemgetter(0))])
 
 
@@ -220,7 +220,6 @@ class HiveThriftContext(object):
 
     def __enter__(self):
         try:
-            from thrift import Thrift
             from thrift.transport import TSocket
             from thrift.transport import TTransport
             from thrift.protocol import TBinaryProtocol
@@ -272,7 +271,7 @@ class HiveQueryTask(luigi.contrib.hadoop.BaseHadoopJobTask):
     def hiverc(self):
         """
         Location of an rc file to run before the query
-        if hiverc-location key is specified in client.cfg, will default to the value there
+        if hiverc-location key is specified in luigi.cfg, will default to the value there
         otherwise returns None.
 
         Returning a list of rc files will load all of them in order.
@@ -335,7 +334,7 @@ class HiveQueryRunner(luigi.contrib.hadoop.JobRunner):
                     except FileAlreadyExists:
                         pass
 
-    def run_job(self, job):
+    def run_job(self, job, tracking_url_callback=None):
         self.prepare_outputs(job)
         with tempfile.NamedTemporaryFile() as f:
             query = job.query()
@@ -355,7 +354,7 @@ class HiveQueryRunner(luigi.contrib.hadoop.JobRunner):
                     arglist += ['--hiveconf', '{0}={1}'.format(k, v)]
 
             logger.info(arglist)
-            return luigi.contrib.hadoop.run_and_track_hadoop_job(arglist)
+            return luigi.contrib.hadoop.run_and_track_hadoop_job(arglist, tracking_url_callback)
 
 
 class HiveTableTarget(luigi.Target):

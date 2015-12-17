@@ -31,7 +31,7 @@ import warnings
 from luigi import six
 
 from luigi import parameter
-from luigi.task_register import Register, TaskClassException
+from luigi.task_register import Register
 
 Parameter = parameter.Parameter
 logger = logging.getLogger('luigi-interface')
@@ -58,10 +58,14 @@ def namespace(namespace=None):
     Register._default_namespace = namespace
 
 
-def id_to_name_and_params(task_id):
-    # DEPRECATED
-    import luigi.tools.parse_task
-    return luigi.tools.parse_task.id_to_name_and_params(task_id)
+class BulkCompleteNotImplementedError(NotImplementedError):
+    """This is here to trick pylint.
+
+    pylint thinks anything raising NotImplementedError needs to be implemented
+    in any subclass. bulk_complete isn't like that. This tricks pylint into
+    thinking that the default implementation is a valid implementation and no
+    an abstract method."""
+    pass
 
 
 @six.add_metaclass(Register)
@@ -77,16 +81,13 @@ class Task(object):
     * :py:meth:`requires` - the list of Tasks that this Task depends on.
     * :py:meth:`output` - the output :py:class:`Target` that this Task creates.
 
-    Parameters to the Task should be declared as members of the class, e.g.::
+    Each :py:class:`~luigi.Parameter` of the Task should be declared as members:
 
-    .. code-block:: python
+    .. code:: python
 
         class MyTask(luigi.Task):
             count = luigi.IntParameter()
-
-
-    Each Task exposes a constructor accepting all :py:class:`Parameter` (and
-    values) as kwargs. e.g. ``MyTask(count=10)`` would instantiate `MyTask`.
+            second_param = luigi.Parameter()
 
     In addition to any declared properties and methods, there are a few
     non-declared properties, which are created by the :py:class:`Register`
@@ -96,9 +97,6 @@ class Task(object):
       optional string which is prepended to the task name for the sake of
       scheduling. If it isn't overridden in a Task, whatever was last declared
       using `luigi.namespace` will be used.
-
-    ``Task._parameters``
-      list of ``(parameter_name, parameter)`` tuples for this task class
     """
 
     _event_callbacks = {}
@@ -115,8 +113,18 @@ class Task(object):
 
     #: Number of seconds after which to time out the run function.
     #: No timeout if set to 0.
-    #: Defaults to 0 or value in client.cfg
+    #: Defaults to 0 or worker-timeout value in config file
+    #: Only works when using multiple workers.
     worker_timeout = None
+
+    @property
+    def owner_email(self):
+        '''
+        Override this to send out additional error emails to task owner, in addition to the one
+        defined in `core`.`error-email`. This should return a string or a list of strings. e.g.
+        'test@exmaple.com' or ['test1@example.com', 'test2@example.com']
+        '''
+        return None
 
     @property
     def use_cmdline_section(self):
@@ -178,7 +186,7 @@ class Task(object):
             params.append((param_name, param_obj))
 
         # The order the parameters are created matters. See Parameter class
-        params.sort(key=lambda t: t[1].counter)
+        params.sort(key=lambda t: t[1]._counter)
         return params
 
     @classmethod
@@ -202,14 +210,14 @@ class Task(object):
         exc_desc = '%s[args=%s, kwargs=%s]' % (task_name, args, kwargs)
 
         # Fill in the positional arguments
-        positional_params = [(n, p) for n, p in params if not p.is_global]
+        positional_params = [(n, p) for n, p in params if p.positional]
         for i, arg in enumerate(args):
             if i >= len(positional_params):
                 raise parameter.UnknownParameterException('%s: takes at most %d parameters (%d given)' % (exc_desc, len(positional_params), len(args)))
             param_name, param_obj = positional_params[i]
             result[param_name] = arg
 
-        # Then the optional arguments
+        # Then the keyword arguments
         for param_name, arg in six.iteritems(kwargs):
             if param_name in result:
                 raise parameter.DuplicateParameterException('%s: parameter %s was already set as a positional parameter' % (exc_desc, param_name))
@@ -234,18 +242,6 @@ class Task(object):
         return [(param_name, list_to_tuple(result[param_name])) for param_name, param_obj in params]
 
     def __init__(self, *args, **kwargs):
-        """
-        Constructor to resolve values for all Parameters.
-
-        For example, the Task:
-
-        .. code-block:: python
-
-            class MyTask(luigi.Task):
-                count = luigi.IntParameter()
-
-        can be instantiated as ``MyTask(count=10)``.
-        """
         params = self.get_params()
         param_values = self.get_param_values(params, args, kwargs)
 
@@ -261,7 +257,7 @@ class Task(object):
         task_id_parts = []
         param_objs = dict(params)
         for param_name, param_value in param_values:
-            if dict(params)[param_name].significant:
+            if param_objs[param_name].significant:
                 task_id_parts.append('%s=%s' % (param_name, param_objs[param_name].serialize(param_value)))
 
         self.task_id = '%s(%s)' % (self.task_family, ', '.join(task_id_parts))
@@ -274,23 +270,23 @@ class Task(object):
         return hasattr(self, 'task_id')
 
     @classmethod
-    def from_str_params(cls, params_str=None):
+    def from_str_params(cls, params_str):
         """
         Creates an instance from a str->str hash.
 
-        :param params_str: dict of param name -> value.
+        :param params_str: dict of param name -> value as string.
         """
-        if params_str is None:
-            params_str = {}
         kwargs = {}
         for param_name, param in cls.get_params():
-            value = param.parse_from_input(param_name, params_str[param_name])
-            kwargs[param_name] = value
+            if param_name in params_str:
+                kwargs[param_name] = param.parse(params_str[param_name])
 
         return cls(**kwargs)
 
     def to_str_params(self):
-        ''' Convert all parameters to a str->str hash.'''
+        """
+        Convert all parameters to a str->str hash.
+        """
         params_str = {}
         params = dict(self.get_params())
         for param_name, param_value in six.iteritems(self.param_kwargs):
@@ -335,7 +331,7 @@ class Task(object):
 
     def complete(self):
         """
-        If the task has any outputs, return ``True`` if all outputs exists.
+        If the task has any outputs, return ``True`` if all outputs exist.
         Otherwise, return ``False``.
 
         However, you may freely override this method with custom logic.
@@ -358,7 +354,7 @@ class Task(object):
         Override (with an efficient implementation) for efficient scheduling
         with range tools. Keep the logic consistent with that of complete().
         """
-        raise NotImplementedError
+        raise BulkCompleteNotImplementedError()
 
     def output(self):
         """
@@ -445,7 +441,9 @@ class Task(object):
         Override for custom error handling.
 
         This method gets called if an exception is raised in :py:meth:`run`.
-        Return value of this method is json encoded and sent to the scheduler as the `expl` argument. Its string representation will be used as the body of the error email sent out if any.
+        The returned value of this method is json encoded and sent to the scheduler
+        as the `expl` argument. Its string representation will be used as the
+        body of the error email sent out if any.
 
         Default behavior is to return a string representation of the stack trace.
         """
@@ -509,12 +507,11 @@ class WrapperTask(Task):
 
 
 class Config(Task):
-
-    """Used for configuration that's not specific to a certain task
-
-    TODO: let's refactor Task & Config so that it inherits from a common
-    ParamContainer base class
     """
+    Class for configuration. See :ref:`ConfigClasses`.
+    """
+    # TODO: let's refactor Task & Config so that it inherits from a common
+    # ParamContainer base class
     pass
 
 
@@ -545,10 +542,10 @@ def flatten(struct):
 
     .. code-block:: python
 
-        >>> flatten({'a': 'foo', 'b': 'bar'})
-        ['foo', 'bar']
-        >>> flatten(['foo', ['bar', 'troll']])
-        ['foo', 'bar', 'troll']
+        >>> sorted(flatten({'a': 'foo', 'b': 'bar'}))
+        ['bar', 'foo']
+        >>> sorted(flatten(['foo', ['bar', 'troll']]))
+        ['bar', 'foo', 'troll']
         >>> flatten('foo')
         ['foo']
         >>> flatten(42)
@@ -566,13 +563,13 @@ def flatten(struct):
 
     try:
         # if iterable
-        for result in struct:
-            flat += flatten(result)
-        return flat
+        iterator = iter(struct)
     except TypeError:
-        pass
+        return [struct]
 
-    return [struct]
+    for result in iterator:
+        flat += flatten(result)
+    return flat
 
 
 def flatten_output(task):

@@ -15,12 +15,8 @@
 # limitations under the License.
 #
 
-try:
-    from collections import OrderedDict
-except ImportError:
-    from ordereddict import OrderedDict
+from collections import OrderedDict
 import os
-import sys
 import tempfile
 from helpers import unittest
 
@@ -157,7 +153,7 @@ class HiveCommandClientTest(unittest.TestCase):
 
     def test_partition_spec(self):
         returned = self.client.partition_spec({'a': 'b', 'c': 'd'})
-        self.assertEqual("a='b',c='d'", returned)
+        self.assertEqual("`a`='b',`c`='d'", returned)
 
     @mock.patch("luigi.contrib.hive.run_hive_cmd")
     def test_apacheclient_table_exists(self, run_command):
