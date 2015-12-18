@@ -152,13 +152,13 @@ def _parse_qsub_job_id(qsub_out, software='sge'):
     if software == TORQUE: return int(qsub_out.split('.')[0])
     return int(qsub_out.split()[2])
 
-def _build_qsub_command(cmd, job_name, outfile, errfile, pe, n_cpu, software='sge'):
+def _build_qsub_command(cmd, job_name, outfile, errfile, pe, n_cpu, nodes=1, software='sge'):
     """Submit shell command to SGE queue via `qsub`"""
-    if software == TORQUE: qsub_template = """echo {cmd} | qsub -o ":{outfile}" -e ":{errfile}" -V -r y -l nodes=1:ppn={n_cpu} -N {job_name}"""
+    if software == TORQUE: qsub_template = """echo {cmd} | qsub -o ":{outfile}" -e ":{errfile}" -V -r y -l nodes={nodes}:ppn={n_cpu} -N {job_name}"""
     else: qsub_template = """echo {cmd} | qsub -o ":{outfile}" -e ":{errfile}" -V -r y -pe {pe} {n_cpu} -N {job_name}"""
     return qsub_template.format(
         cmd=cmd, job_name=job_name, outfile=outfile, errfile=errfile,
-        pe=pe, n_cpu=n_cpu)
+        pe=pe, n_cpu=n_cpu, nodes=nodes)
 
 
 class SGEJobTask(luigi.Task):
@@ -171,6 +171,8 @@ class SGEJobTask(luigi.Task):
 
     - n_cpu: Number of CPUs (or "slots") to allocate for the Task. This
           value is passed as ``qsub -pe {pe} {n_cpu}``
+    - nodes: Number of compute nodes to allocate for the task. (Torque only)
+    - software: torque or sge.
     - parallel_env: SGE parallel environment name. The default is "orte",
           the parallel environment installed with MIT StarCluster. If you
           are using a different cluster environment, check with your
@@ -184,6 +186,7 @@ class SGEJobTask(luigi.Task):
     """
 
     n_cpu = luigi.IntParameter(default=2, significant=False)
+    nodes = luigi.IntParameter(default=1, significant=False)
     shared_tmp_dir = luigi.Parameter(default='/home', significant=False)
     parallel_env = luigi.Parameter(default='orte', significant=False)
     software = luigi.Parameter(default=SGE, significant=False)
@@ -263,7 +266,7 @@ class SGEJobTask(luigi.Task):
         self.outfile = os.path.join(self.tmp_dir, 'job.out')
         self.errfile = os.path.join(self.tmp_dir, 'job.err')
         submit_cmd = _build_qsub_command(job_str, self.task_family, self.outfile,
-                                         self.errfile, self.parallel_env, self.n_cpu, self.software)
+                                         self.errfile, self.parallel_env, self.n_cpu, self.nodes, self.software)
         logger.debug('qsub command: \n' + submit_cmd)
 
         # Submit the job and grab job ID
