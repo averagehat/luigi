@@ -267,7 +267,8 @@ class SGEJobTask(luigi.Task):
         logger.debug('qsub command: \n' + submit_cmd)
 
         # Submit the job and grab job ID
-        output = subprocess.check_output(submit_cmd, shell=True)
+        #output = subprocess.check_output(submit_cmd, shell=True) #not in py26
+        output = subprocess.Popen(submit_cmd, shell=True, stdout=subprocess.PIPE).communicate()[0]
         self.job_id = _parse_qsub_job_id(output, self.software)
         logger.debug("Submitted job to qsub with response:\n" + output)
 
@@ -286,7 +287,8 @@ class SGEJobTask(luigi.Task):
             # See what the job's up to
             # ASSUMPTION
 
-            qstat_out = subprocess.check_output(['qstat'])
+            #qstat_out = subprocess.check_output(['qstat'])#not in py26
+            qstat_out = subprocess.Popen(['qstat'], stdout=subprocess.PIPE).communicate()[0]
             sge_status = _parse_qstat_state(qstat_out, self.job_id)
             if sge_status.lower() == 'r':
                 logger.info('Job is running...')
@@ -297,10 +299,12 @@ class SGEJobTask(luigi.Task):
                 break
             elif sge_status == 't' or sge_status == 'u' or sge_status == 'C':
                 # Then the job could either be failed or done.
-                errors = self._fetch_task_failures()
-                errors = [e for e in errors if not "warning" in e.lower()]
+                # the success of a job is defined by whether or not its output exists, not the presence of stderr.
+                errors = None
+#                errors = self._fetch_task_failures()
+#                errors = [e for e in errors if not "warning" in e.lower()]
                 if not errors:
-                    logger.info('Job is done') 
+                    logger.info('Job is done')
                     map(os.listdir, self.unstales) # this fixes the stale file error
                 else:
                     logger.error('Job has FAILED:\n' + '\n'.join(errors))
