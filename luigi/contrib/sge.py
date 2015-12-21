@@ -190,7 +190,14 @@ class SGEJobTask(luigi.Task):
     shared_tmp_dir = luigi.Parameter(default='/home', significant=False)
     parallel_env = luigi.Parameter(default='orte', significant=False)
     software = luigi.Parameter(default=SGE, significant=False)
-
+    def fetch_all_output(self):
+        failures = self._fetch_task_failures()
+        if not os.path.exists(self.stdout):
+            logger.info('No error file')
+            return failures
+        with open(self.stdout, "r") as f:
+            stdout = f.readlines()
+        return ['ERRORS:\n'] + failures + ['\nSTDOUT:\n'] + stdout
     def _fetch_task_failures(self):
         if not os.path.exists(self.errfile):
             logger.info('No error file')
@@ -315,7 +322,8 @@ class SGEJobTask(luigi.Task):
                     map(os.listdir, self.unstales) # this fixes the stale file error
                 else:
                     errors = self._fetch_task_failures()
-                    logger.error('Job has FAILED:\n' + '\n'.join(errors))
+                    alloutput = self.fetch_all_output()
+                    logger.error('Job has FAILED:\n' + '\n'.join(alloutput))
                 break
             else:
                 logger.info('Job status is UNKNOWN!')
