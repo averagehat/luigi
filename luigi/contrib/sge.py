@@ -204,7 +204,11 @@ class SGEJobTask(luigi.Task):
         return errors
 
     def _init_local(self):
-        def up(p): return os.path.dirname(os.path.normpath(p))
+        ''' this function requires that self.output() returns absolute paths.'''
+        def up(p):
+            if not os.path.isabs(p):
+                raise ValueError('Path %s is not absolute. Class %s must report absolute paths in its output() method.' % (p, self.__class__.__name__))
+            return os.path.dirname(os.path.normpath(p))
         unstale = lambda f:  f if os.path.exists(f) else unstale(up(f))
         self.unstales = map(lambda x: unstale(x.path), flatten(self.output()))
         # Set up temp folder in shared directory (trim to max filename length)
@@ -310,6 +314,7 @@ class SGEJobTask(luigi.Task):
                     logger.info('Job is done')
                     map(os.listdir, self.unstales) # this fixes the stale file error
                 else:
+                    errors = self._fetch_task_failures()
                     logger.error('Job has FAILED:\n' + '\n'.join(errors))
                 break
             else:
